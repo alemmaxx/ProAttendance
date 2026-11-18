@@ -1200,6 +1200,10 @@ function viewSettings() {
       <label class="switch"><input type="checkbox" id="tVisit" ${st.visits ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><div><b>${L('Kadar tuntutan perbatuan', 'Mileage claim rate')}</b><div class="small muted">${L('RM sekilometer. Pekerja isi jarak (km), jumlah dikira sendiri. Kosong = pekerja isi jumlah sendiri.', 'RM per km. Staff enter the distance (km) and the amount is calculated. Blank = staff enter the amount.')}</div></div>
       <input class="input" type="number" step="0.01" min="0" id="wMile" value="${st.mileageRate ?? ''}" placeholder="0.60" style="max-width:110px"></div>
+    <div class="set-row"><div><b>${L('Elaun outstation (RM sehari)', 'Outstation allowance (RM per day)')}</b><div class="small muted">${L('Pekerja isi bilangan hari; jumlah dikira sendiri.', 'Staff enter the number of days; the amount is calculated.')}</div></div>
+      <input class="input" type="number" step="0.01" min="0" id="wOut" value="${st.outstationRate ?? ''}" placeholder="50" style="max-width:110px"></div>
+    <div class="set-row"><div><b>${L('Elaun bermalam (RM semalam)', 'Overnight allowance (RM per night)')}</b><div class="small muted">${L('Pekerja isi bilangan malam; jumlah dikira sendiri.', 'Staff enter the number of nights; the amount is calculated.')}</div></div>
+      <input class="input" type="number" step="0.01" min="0" id="wNight" value="${st.overnightRate ?? ''}" placeholder="80" style="max-width:110px"></div>
     <button class="btn btn-primary" id="saveWork" style="margin-top:.8rem">${L('Simpan Tetapan', 'Save Settings')}</button>
   </div>
 
@@ -1318,7 +1322,7 @@ function viewSettings() {
         'settings.autoBreak': $('#tABrk').checked, 'settings.breakStart': $('#wBs').value || '', 'settings.breakEnd': $('#wBe').value || '',
         'settings.autoOT': $('#tAOT').checked, 'settings.otMin': Number($('#wOm').value || 0), 'settings.otRound': Math.max(1, Number($('#wOr').value || 15)),
         'settings.workDays': $$('[data-wd]').filter(x => x.checked).map(x => Number(x.dataset.wd)),
-        'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked, 'settings.mileageRate': Number($('#wMile').value || 0)
+        'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked, 'settings.mileageRate': Number($('#wMile').value || 0), 'settings.outstationRate': Number($('#wOut').value || 0), 'settings.overnightRate': Number($('#wNight').value || 0)
       });
       logAct('settings.work');
       toast(L('Tetapan disimpan.', 'Settings saved.'));
@@ -1468,6 +1472,19 @@ async function viewBilling() {
 }
 function planName(p) {
   return ({ monthly: L('Bulanan', 'Monthly'), sixMonth: L('6 Bulan', '6 Months'), yearly: L('Tahunan', 'Yearly'), trial: L('Percubaan', 'Trial'), manual: L('Manual', 'Manual') })[p] || (p || '-');
+}
+
+const CLAIM_LABEL = (k) => ({ mileage: L('Perbatuan', 'Mileage'), toll: L('Tol', 'Toll'), parking: L('Parkir', 'Parking'), fuel: L('Minyak', 'Fuel'),
+  outstation: L('Elaun Outstation', 'Outstation'), overnight: L('Elaun Bermalam', 'Overnight'), meal: L('Makan', 'Meals'), hotel: L('Hotel', 'Hotel'),
+  transport: L('Pengangkutan', 'Transport'), other: L('Lain-lain', 'Others') })[k] || k;
+function claimItemsHtml(r) {
+  const unit = { mileage: 'km', outstation: L('hari', 'days'), overnight: L('malam', 'nights') };
+  return `<div class="table-wrap" style="margin-top:.5rem"><table><thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Perkara', 'Item')}</th><th>${L('No. resit', 'Receipt no.')}</th><th class="right">RM</th><th></th></tr></thead><tbody>
+    ${r.items.map(x => `<tr><td class="small">${fmtDate(x.date, { day: 'numeric', month: 'short' })}</td>
+      <td><b>${esc(CLAIM_LABEL(x.cat))}</b>${x.qty ? ` <span class="xs muted">${x.qty} ${unit[x.cat] || ''}${x.rate ? ' × ' + money(x.rate) : ''}</span>` : ''}${x.desc ? `<div class="xs muted">${esc(x.desc)}</div>` : ''}</td>
+      <td class="small mono">${esc(x.inv || '-')}</td><td class="right">${money(x.amount)}</td>
+      <td>${x.photo ? `<img src="${x.photo}" class="thumb" data-ciph="1">` : ''}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><th colspan="3">${L('Jumlah', 'Total')}</th><th class="right">${money(r.items.reduce((a, x) => a + Number(x.amount || 0), 0))}</th><th></th></tr></tfoot></table></div>`;
 }
 
 // ================================================================ SYIF & JADUAL
@@ -1686,6 +1703,7 @@ async function drawApprovals() {
       </div>
       <div class="small" style="margin-top:.4rem">${detail} ${extra}</div>
       ${r.reason ? `<div class="small muted" style="margin-top:.3rem">“${esc(r.reason)}”</div>` : ''}
+      ${r.kind === 'claim' && r.items?.length ? claimItemsHtml(r) : ''}
       ${r.attachment ? `<img src="${r.attachment}" class="thumb" style="width:64px;height:64px;margin-top:.5rem;border-radius:8px;object-fit:cover;cursor:pointer" data-att="${r.id}">` : ''}
       ${r.adminNote ? `<div class="xs" style="margin-top:.3rem">💬 ${esc(r.adminNote)}</div>` : ''}
       <div class="row between" style="margin-top:.6rem">
@@ -1696,6 +1714,7 @@ async function drawApprovals() {
       </div>
     </div>`;
   }).join('');
+  $$('[data-ciph]', box).forEach(im => im.onclick = () => modal({ title: L('Resit', 'Receipt'), body: `<img src="${im.src}" style="width:100%;border-radius:10px">` }));
   $$('[data-att]', box).forEach(im => im.onclick = () => modal({ title: L('Lampiran', 'Attachment'), body: `<img src="${im.src}" style="width:100%;border-radius:10px">` }));
   $$('[data-ok]', box).forEach(b => b.onclick = () => decide(list.find(r => r.id === b.dataset.ok), true));
   $$('[data-rej]', box).forEach(b => b.onclick = () => decide(list.find(r => r.id === b.dataset.rej), false));
@@ -2626,7 +2645,13 @@ async function seedDemo(btn) {
     R(workers[3], { kind: 'leave', typeId: 'sick', typeName: leaveTypeName(c, 'sick'), from: addDays(t, 3), to: addDays(t, 3), half: '', days: 1, reason: L('Temujanji klinik', 'Clinic appointment'), status: 'pending' });
     R(workers[0], { kind: 'ot', date: addDays(t, -3), start: '18:00', end: '21:00', hours: 3, approvedHours: 3, otKind: 'normal', reason: L('Stok masuk', 'Stock arrival'), status: 'approved' });
     R(workers[4], { kind: 'ot', date: addDays(t, -1), start: '23:00', end: '01:00', hours: 2, otKind: 'normal', reason: L('Kerosakan mesin', 'Machine breakdown'), status: 'pending' });
-    R(workers[1], { kind: 'claim', date: addDays(t, -2), amount: 45.6, category: L('Tol', 'Toll'), reason: L('Hantar dokumen ke bank', 'Delivered documents to the bank'), status: 'pending' });
+    R(workers[1], { kind: 'claim', date: addDays(t, -1), amount: 152.6, category: `4 ${L('item', 'items')}`, status: 'pending', reason: L('Perbatuan, Tol, Parkir, Elaun Outstation', 'Mileage, Toll, Parking, Outstation'),
+      items: [
+        { cat: 'mileage', date: addDays(t, -2), qty: 64, rate: 0.6, amount: 38.4, inv: '', desc: L('Pejabat → Bank, Shah Alam (pergi-balik)', 'Office → Bank, Shah Alam (return)') },
+        { cat: 'toll', date: addDays(t, -2), amount: 4.2, inv: 'TNG-88213', desc: 'Plaza Tol Sg Rasau' },
+        { cat: 'parking', date: addDays(t, -2), amount: 10, inv: 'PK-55102', desc: 'Parkir Bank' },
+        { cat: 'outstation', date: addDays(t, -2), qty: 2, rate: 50, amount: 100, inv: '', desc: L('Outstation 2 hari', '2-day outstation') }
+      ] });
     R(workers[0], { kind: 'claim', date: addDays(t, -6), amount: 80, approvedAmount: 80, category: L('Minyak', 'Fuel'), reason: L('Lawatan pembekal', 'Supplier visit'), status: 'approved' });
     R(workers[3], { kind: 'advance', date: addDays(t, -5), amount: 200, approvedAmount: 200, reason: L('Kecemasan', 'Emergency'), status: 'approved' });
     R(workers[5], { kind: 'fix', date: addDays(t, -1), time: '18:05', type: 'out', reason: L('Terlupa punch keluar', 'Forgot to clock out'), status: 'pending' });

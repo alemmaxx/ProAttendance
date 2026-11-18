@@ -615,7 +615,12 @@ async function openDay(d, recs) {
   const inf = dayInfo(d), lvReq = leaveDateMap(S.reqs)[d], holName = holidayMap(S.company)[d];
   const punches = recs.filter(r => r.type !== 'visit'), visits = recs.filter(r => r.type === 'visit');
   const sm = punches.length ? summarizeDay(punches, lateSettings(S.company, inf), d) : null;
-  const claims = S.reqs.filter(r => r.kind === 'claim' && r.date === d && r.status !== 'cancelled');
+  const claims = [];
+  S.reqs.filter(r => r.kind === 'claim' && r.status !== 'cancelled').forEach(r => {
+    if (r.items?.length) r.items.filter(x => x.date === d).forEach(x => claims.push({ category: catLabel(x.cat), km: x.cat === 'mileage' ? x.qty : 0, amount: x.amount, status: r.status }));
+    else if (r.date === d) claims.push(r);
+  });
+  getDraft().filter(x => x.date === d).forEach(x => claims.push({ category: catLabel(x.cat), km: x.cat === 'mileage' ? x.qty : 0, amount: x.amount, status: 'draft' }));
   const row = (k, v) => v ? `<div class="set-row"><span class="muted small">${k}</span><b class="right">${v}</b></div>` : '';
   const t = todayStr();
   const visitTxt = visits.map(v => `${fmtTime(punchTime(v))} ${v.locName}${v.note ? ' (' + v.note + ')' : ''}`).join('; ');
@@ -628,7 +633,7 @@ async function openDay(d, recs) {
         + row(L('Jam kerja', 'Hours'), minsToHM(sm.workMin)) + row(L('Rehat', 'Break'), sm.breakMin >= 1 ? Math.round(sm.breakMin) + 'm' + (sm.autoBreak ? ' (auto)' : '') : '')
         + row(L('Lewat', 'Late'), sm.lateMin ? sm.lateMin + 'm' : '') : (d <= t && inf.type === 'work' && !lvReq ? row(L('Status', 'Status'), `<span class="badge b-bad">${L('Tiada punch', 'No punch')}</span>`) : '')}
       ${visits.length ? `<div class="sec-title">${L('Lawatan tapak', 'Site visits')}</div>${visits.map(v => `<div class="set-row"><span>${fmtTime(punchTime(v))} · ${esc(v.locName)}${v.note ? `<div class="xs muted">${esc(v.note)}</div>` : ''}</span>${v.lat != null ? `<a class="xs" target="_blank" href="https://www.google.com/maps?q=${v.lat},${v.lng}">${L('Peta', 'Map')}</a>` : ''}</div>`).join('')}` : ''}
-      ${claims.length ? `<div class="sec-title">${L('Tuntutan hari ini', 'Claims this day')}</div>${claims.map(c => `<div class="set-row"><span>${esc(c.category || '')}${c.km ? ` · ${c.km} km` : ''}</span><span>${money(c.approvedAmount ?? c.amount)} ${STATUS_BADGE(c.status)}</span></div>`).join('')}` : ''}
+      ${claims.length ? `<div class="sec-title">${L('Tuntutan hari ini', 'Claims this day')}</div>${claims.map(c => `<div class="set-row"><span>${esc(c.category || '')}${c.km ? ` · ${c.km} km` : ''}</span><span>${money(c.approvedAmount ?? c.amount)} ${c.status === 'draft' ? `<span class="badge">${L('Draf', 'Draft')}</span>` : STATUS_BADGE(c.status)}</span></div>`).join('')}` : ''}
       <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b class="right">${esc(S.plans?.[d] || '-')}</b></div>
       <div class="stack" style="margin-top:.8rem">
         <button class="btn btn-soft btn-block" data-da="note">📍 ${S.plans?.[d] ? L('Ubah catatan', 'Edit note') : L('Tambah catatan pergi mana', 'Add where-to note')}</button>
@@ -641,7 +646,7 @@ async function openDay(d, recs) {
     const a = b.dataset.da;
     setTimeout(() => {
       if (a === 'note') planNote(d);
-      else if (a === 'claim') claimForm({ date: d, cat: L('Perbatuan (km)', 'Mileage (km)'), desc: [S.plans?.[d], visitTxt].filter(Boolean).join(' — ') });
+      else if (a === 'claim') claimForm({ date: d, desc: [S.plans?.[d], visitTxt].filter(Boolean).join(' — ') });
       else fixForm({ date: d });
     }, 60);
   });
@@ -751,7 +756,7 @@ function viewMohon() {
       <button class="btn btn-soft btn-block" id="rqLeave">${icon('cal', 18)} ${L('Mohon Cuti / MC', 'Apply Leave / MC')}</button>
       <button class="btn btn-soft btn-block" id="rqOt">${icon('clock', 18)} ${L('Mohon OT', 'Apply Overtime')}</button>
       <button class="btn btn-soft btn-block" id="rqFix">${icon('check', 18)} ${L('Betulkan Punch (terlupa punch)', 'Fix Punch (forgot to punch)')}</button>
-      <button class="btn btn-soft btn-block" id="rqClaim">${icon('money', 18)} ${L('Tuntutan (minyak, tol, dll.)', 'Claim (fuel, toll, etc.)')}</button>
+      <button class="btn btn-soft btn-block" id="rqClaim">${icon('money', 18)} ${L('Tuntutan (perbatuan, tol, outstation, resit…)', 'Claims (mileage, toll, outstation, receipts…)')}${getDraft().length ? ` <span class="badge b-warn">${L('draf', 'draft')} ${getDraft().length}</span>` : ''}</button>
       <button class="btn btn-soft btn-block" id="rqAdv">${icon('card', 18)} ${L('Pendahuluan Gaji', 'Salary Advance')}</button>
       <button class="btn btn-soft btn-block" id="rqSwap">${icon('users', 18)} ${L('Tukar Syif dengan Rakan', 'Swap Shift with Colleague')}</button>
     </div>
@@ -772,7 +777,7 @@ function viewMohon() {
 function reqDetail(r) {
   if (r.kind === 'leave') return `${esc(r.typeName || leaveTypeName(S.company, r.typeId))} · ${fmtDate(r.from)}${r.to && r.to !== r.from ? ' – ' + fmtDate(r.to) : ''} · ${r.days} ${L('hari', 'day(s)')}${r.half ? ' (' + (r.half === 'am' ? L('pagi', 'AM') : L('petang', 'PM')) + ')' : ''}`;
   if (r.kind === 'ot') return `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · ${r.approvedHours ?? r.hours} ${L('jam', 'hrs')}`;
-  if (r.kind === 'claim') return `${esc(r.category || '')} · ${fmtDate(r.date)} · ${money(r.approvedAmount ?? r.amount)}${r.paidPeriod ? ' · ' + L('dibayar', 'paid') + ' ' + esc(r.paidPeriod) : ''}`;
+  if (r.kind === 'claim') return `${esc(r.category || '')}${r.items?.length ? ` (${r.items.length} ${L('item', 'items')})` : ''} · ${fmtDate(r.date)} · ${money(r.approvedAmount ?? r.amount)}${r.paidPeriod ? ' · ' + L('dibayar', 'paid') + ' ' + esc(r.paidPeriod) : ''}`;
   if (r.kind === 'swap') return `${fmtDate(r.date)} · ${L('dengan', 'with')} ${esc(r.withId)}`;
   if (r.kind === 'advance') return `${money(r.approvedAmount ?? r.amount)} · ${fmtDate(r.date)}${r.paidPeriod ? ' · ' + L('dipotong', 'deducted') + ' ' + esc(r.paidPeriod) : ''}`;
   return `${fmtDate(r.date)} · ${TYPE_LABEL[r.type]?.() || r.type} ${esc(r.time)}`;
@@ -936,48 +941,166 @@ function fixForm(pre = {}) {
   });
 }
 
+// ================= TUNTUTAN (resit berbilang, draf, semak sebelum hantar) =================
+const CLAIM_CATS = () => {
+  const st = S.company.settings || {};
+  return [
+    { k: 'mileage', label: L('Perbatuan', 'Mileage'), unit: 'km', rate: Number(st.mileageRate || 0) },
+    { k: 'toll', label: L('Tol', 'Toll') },
+    { k: 'parking', label: L('Parkir', 'Parking') },
+    { k: 'fuel', label: L('Minyak', 'Fuel') },
+    { k: 'outstation', label: L('Elaun Outstation', 'Outstation Allowance'), unit: 'day', rate: Number(st.outstationRate || 0) },
+    { k: 'overnight', label: L('Elaun Bermalam', 'Overnight Allowance'), unit: 'night', rate: Number(st.overnightRate || 0) },
+    { k: 'meal', label: L('Makan', 'Meals') },
+    { k: 'hotel', label: L('Hotel / Penginapan', 'Hotel / Lodging') },
+    { k: 'transport', label: L('Pengangkutan (Grab, tiket…)', 'Transport (Grab, tickets…)') },
+    { k: 'other', label: L('Lain-lain', 'Others') }
+  ];
+};
+const UNIT = { km: () => 'km', day: () => L('hari', 'days'), night: () => L('malam', 'nights') };
+const draftKey = () => `pa_claim_${S.cid}_${S.me.workerId}`;
+const getDraft = () => { try { return JSON.parse(localStorage.getItem(draftKey()) || '[]'); } catch { return []; } };
+const setDraft = (d) => { try { localStorage.setItem(draftKey(), JSON.stringify(d)); } catch { toast(L('Storan telefon penuh. Kurangkan gambar.', 'Phone storage full. Use fewer photos.'), 'bad'); } };
+const catLabel = (k) => CLAIM_CATS().find(c => c.k === k)?.label || k;
+
+// Dipanggil dari butang Mohon / kalendar. pre.date → terus tambah resit untuk tarikh itu.
 function claimForm(pre = {}) {
-  const t = todayStr();
-  let rcpt = null;
-  const rate = Number(S.company.settings?.mileageRate || 0);
-  const MILE = L('Perbatuan (km)', 'Mileage (km)');
-  const cats = [MILE, L('Minyak', 'Fuel'), L('Tol', 'Toll'), L('Parkir', 'Parking'), L('Makan', 'Meals'), L('Pengangkutan', 'Transport'), L('Lain-lain', 'Others')];
+  if (pre && pre.date) itemForm({ date: pre.date, cat: 'mileage', desc: pre.desc || '' }, null, () => claimScreen());
+  else claimScreen();
+}
+
+function claimTotals() {
+  const yr = String(new Date().getFullYear());
+  const cl = S.reqs.filter(r => r.kind === 'claim');
+  const amt = (r) => Number(r.approvedAmount ?? r.amount ?? 0);
+  return {
+    draft: getDraft().reduce((a, x) => a + Number(x.amount || 0), 0),
+    pending: cl.filter(r => r.status === 'pending').reduce((a, r) => a + amt(r), 0),
+    approved: cl.filter(r => r.status === 'approved' && !r.paidPeriod).reduce((a, r) => a + amt(r), 0),
+    paid: cl.filter(r => r.status === 'approved' && r.paidPeriod && String(r.paidPeriod).startsWith(yr)).reduce((a, r) => a + amt(r), 0)
+  };
+}
+
+function claimScreen() {
+  const draft = getDraft(), tot = claimTotals();
   const m = modal({
-    title: L('Tuntutan', 'Claim'),
+    title: L('Tuntutan Saya', 'My Claims'), wide: true,
+    body: `
+      <div class="stats">
+        <div class="stat"><div class="n" style="font-size:1.15rem">${money(tot.draft)}</div><div class="t">${L('Draf (belum hantar)', 'Draft (not sent)')}</div></div>
+        <div class="stat warn"><div class="n" style="font-size:1.15rem">${money(tot.pending)}</div><div class="t">${L('Menunggu kelulusan', 'Pending approval')}</div></div>
+        <div class="stat info"><div class="n" style="font-size:1.15rem">${money(tot.approved)}</div><div class="t">${L('Lulus, belum dibayar', 'Approved, unpaid')}</div></div>
+        <div class="stat ok"><div class="n" style="font-size:1.15rem">${money(tot.paid)}</div><div class="t">${L('Dibayar tahun ini', 'Paid this year')}</div></div>
+      </div>
+      <div class="sec-title">${L('Resit dalam draf', 'Receipts in draft')} (${draft.length})</div>
+      ${draft.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Perkara', 'Item')}</th><th>${L('No. resit', 'Receipt no.')}</th><th class="right">RM</th><th></th></tr></thead><tbody>
+        ${draft.map((x, i) => `<tr><td class="small">${fmtDate(x.date, { day: 'numeric', month: 'short' })}</td>
+          <td><b>${esc(catLabel(x.cat))}</b>${x.qty ? ` <span class="xs muted">${x.qty} ${UNIT[CLAIM_CATS().find(c => c.k === x.cat)?.unit]?.() || ''}</span>` : ''}${x.desc ? `<div class="xs muted">${esc(x.desc)}</div>` : ''}${x.photo ? ' 🧾' : ''}</td>
+          <td class="small mono">${esc(x.inv || '-')}</td><td class="right bold">${money(x.amount)}</td>
+          <td style="white-space:nowrap"><button class="icon-btn" data-ie="${i}">✎</button><button class="icon-btn" data-id="${i}">✕</button></td></tr>`).join('')}</tbody>
+        <tfoot><tr><th colspan="3">${L('Jumlah', 'Total')}</th><th class="right">${money(tot.draft)}</th><th></th></tr></tfoot></table></div>`
+        : `<div class="empty small">${L('Tiada resit lagi. Tekan "+ Tambah resit".', 'No receipts yet. Tap "+ Add receipt".')}</div>`}
+      <div class="row" style="margin-top:.8rem">
+        <button class="btn btn-plus" id="ciAdd">${icon('plus', 16)} ${L('Tambah resit / item', 'Add receipt / item')}</button>
+        ${draft.length ? `<button class="btn btn-primary" id="ciRev">${icon('check', 16)} ${L('Semak & Hantar', 'Review & Submit')}</button>` : ''}
+      </div>
+      <div class="sec-title">${L('Tuntutan dihantar', 'Submitted claims')}</div>
+      ${S.reqs.filter(r => r.kind === 'claim').slice(0, 30).map(r => `<div class="set-row"><div><b>${money(r.approvedAmount ?? r.amount)}</b> · ${(r.items || []).length || 1} ${L('item', 'item(s)')}
+        <div class="xs muted">${fmtDate(r.date)}${r.paidPeriod ? ' · ' + L('dibayar', 'paid') + ' ' + esc(r.paidPeriod) : ''}${r.adminNote ? ' · 💬 ' + esc(r.adminNote) : ''}</div></div>${STATUS_BADGE(r.status)}</div>`).join('')
+        || `<div class="empty small">${L('Belum ada.', 'None yet.')}</div>`}`
+  });
+  const el = m.el;
+  $('#ciAdd', el).onclick = () => { m.close(); itemForm({}, null, () => claimScreen()); };
+  $('#ciRev', el) && ($('#ciRev', el).onclick = () => { m.close(); reviewClaim(); });
+  $$('[data-ie]', el).forEach(b => b.onclick = () => { m.close(); itemForm(getDraft()[Number(b.dataset.ie)], Number(b.dataset.ie), () => claimScreen()); });
+  $$('[data-id]', el).forEach(b => b.onclick = async () => {
+    if (!await confirmBox(L('Buang item ini dari draf?', 'Remove this item from the draft?'))) return;
+    const d = getDraft(); d.splice(Number(b.dataset.id), 1); setDraft(d); m.close(); claimScreen();
+  });
+}
+
+function itemForm(it = {}, idx = null, after) {
+  const t = todayStr(), cats = CLAIM_CATS();
+  let photo = it.photo || null;
+  const m = modal({
+    title: idx === null ? L('Tambah resit / item', 'Add receipt / item') : L('Ubah item', 'Edit item'),
     body: `
       <div class="grid2">
-        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="cd" value="${esc(pre.date || t)}" max="${t}"></div>
-        <div class="field"><label class="lbl">${L('Kategori', 'Category')}</label>
-          <select class="input" id="cc">${cats.map(c => `<option ${c === (pre.cat || '') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+        <div class="field"><label class="lbl">${L('Jenis', 'Type')}</label><select class="input" id="ic">${cats.map(c => `<option value="${c.k}" ${c.k === (it.cat || 'toll') ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>
+        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="idt" value="${esc(it.date || t)}" max="${t}"></div>
       </div>
       <div class="grid2">
-        <div class="field" id="kmF"><label class="lbl">${L('Jarak (km)', 'Distance (km)')}${rate ? ` · RM${rate}/km` : ''}</label><input class="input" type="number" step="0.1" min="0" id="ck" inputmode="decimal"></div>
-        <div class="field"><label class="lbl">${L('Jumlah (RM)', 'Amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="ca" inputmode="decimal"></div>
+        <div class="field" id="iqF"><label class="lbl" id="iqL"></label><input class="input" type="number" step="0.1" min="0" id="iq" value="${it.qty ?? ''}" inputmode="decimal"></div>
+        <div class="field"><label class="lbl">${L('No. resit / invois', 'Receipt / invoice no.')}</label><input class="input" id="ii" maxlength="40" value="${esc(it.inv || '')}"></div>
       </div>
-      <div class="field"><label class="lbl">${L('Keterangan', 'Description')}</label><textarea class="input" id="cr" maxlength="500" style="min-height:60px">${esc(pre.desc || '')}</textarea></div>
-      <div class="field"><label class="lbl">${L('Gambar resit', 'Receipt photo')}</label>
-        <input class="input" type="file" accept="image/*" id="cf"><div id="cfPrev" style="margin-top:.4rem"></div></div>`,
+      <div class="field"><label class="lbl">${L('Jumlah (RM)', 'Amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="ia" value="${it.amount ?? ''}" inputmode="decimal" style="font-size:1.2rem;font-weight:800"></div>
+      <div class="field"><label class="lbl">${L('Keterangan (lokasi, tujuan)', 'Description (place, purpose)')}</label><textarea class="input" id="ids" maxlength="300" style="min-height:60px">${esc(it.desc || '')}</textarea></div>
+      <div class="field"><label class="lbl">${L('Gambar resit', 'Receipt photo')}</label><input class="input" type="file" accept="image/*" id="ip"><div id="ipP" style="margin-top:.4rem">${photo ? `<img src="${photo}" style="max-width:120px;border-radius:8px">` : ''}</div></div>`,
     actions: [
-      { label: L('Batal', 'Cancel') },
+      { label: L('Batal', 'Cancel'), onClick: () => { after && setTimeout(after, 60); } },
       {
-        label: L('Hantar', 'Submit'), cls: 'btn-primary', onClick: async ({ el }) => {
-          const amount = Number($('#ca', el).value || 0), date = $('#cd', el).value;
-          if (!(amount > 0) || !date) { toast(L('Sila isi tarikh dan jumlah.', 'Please fill in date and amount.'), 'warn'); return false; }
-          const km = $('#cc', el).value === MILE ? Number($('#ck', el).value || 0) : 0;
-          try { await submitReq({ kind: 'claim', date, amount, km, category: $('#cc', el).value, reason: $('#cr', el).value.trim(), attachment: rcpt }); }
-          catch (e) { toast(authErr(e), 'bad'); return false; }
+        label: L('Simpan ke draf', 'Save to draft'), cls: 'btn-primary', onClick: ({ el }) => {
+          const cat = $('#ic', el).value, c = cats.find(x => x.k === cat);
+          const amount = Math.round(Number($('#ia', el).value || 0) * 100) / 100, date = $('#idt', el).value;
+          const qty = c.unit ? Number($('#iq', el).value || 0) : 0;
+          if (!date || !(amount > 0)) { toast(L('Sila isi tarikh dan jumlah.', 'Please fill in date and amount.'), 'warn'); return false; }
+          if (c.unit && !(qty > 0)) { toast(L('Sila isi kuantiti.', 'Please enter the quantity.'), 'warn'); return false; }
+          const item = { cat, date, inv: $('#ii', el).value.trim(), amount, qty: qty || null, rate: c.rate || null, desc: $('#ids', el).value.trim(), photo };
+          const d = getDraft();
+          if (idx === null) { if (d.length >= 15) { toast(L('Maksimum 15 item setiap tuntutan. Hantar dahulu.', 'Max 15 items per claim. Submit first.'), 'warn'); return false; } d.push(item); }
+          else d[idx] = item;
+          setDraft(d);
+          toast(L('Disimpan ke draf.', 'Saved to draft.'));
+          after && setTimeout(after, 60);
         }
       }
     ]
   });
-  $('#cf', m.el).onchange = async (e) => {
-    const f = e.target.files[0]; if (!f) { rcpt = null; $('#cfPrev', m.el).innerHTML = ''; return; }
-    try { rcpt = await fileToDataURL(f, 900, 'image/jpeg', 0.6); $('#cfPrev', m.el).innerHTML = `<img src="${rcpt}" style="max-width:120px;border-radius:8px">`; }
+  const el = m.el;
+  const sync = () => {
+    const c = cats.find(x => x.k === $('#ic', el).value);
+    $('#iqF', el).style.display = c.unit ? '' : 'none';
+    $('#iqL', el).textContent = c.unit ? `${L('Kuantiti', 'Quantity')} (${UNIT[c.unit]()})${c.rate ? ` × ${money(c.rate)}` : ''}` : '';
+    if (c.unit && c.rate && $('#iq', el).value) $('#ia', el).value = (Number($('#iq', el).value) * c.rate).toFixed(2);
+  };
+  $('#ic', el).onchange = sync; $('#iq', el).oninput = sync; sync();
+  $('#ip', el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { photo = await fileToDataURL(f, 700, 'image/jpeg', 0.55); $('#ipP', el).innerHTML = `<img src="${photo}" style="max-width:120px;border-radius:8px">`; }
     catch { toast(L('Gagal membaca imej.', 'Failed to read image.'), 'bad'); }
   };
-  const syncKm = () => { $('#kmF', m.el).style.display = $('#cc', m.el).value === MILE ? '' : 'none'; };
-  $('#cc', m.el).onchange = syncKm; syncKm();
-  $('#ck', m.el).oninput = () => { if (rate) $('#ca', m.el).value = (Number($('#ck', m.el).value || 0) * rate).toFixed(2); };
+}
+
+function reviewClaim() {
+  const d = getDraft();
+  const total = Math.round(d.reduce((a, x) => a + Number(x.amount || 0), 0) * 100) / 100;
+  const noPhoto = d.filter(x => !x.photo && !['mileage', 'outstation', 'overnight'].includes(x.cat)).length;
+  const m = modal({
+    title: L('Semak tuntutan sebelum hantar', 'Review claim before submitting'), wide: true,
+    body: `
+      <p class="small muted">${L('Pastikan semua maklumat betul. Selepas dihantar, tuntutan tidak boleh diubah (hanya dibatalkan).', 'Make sure everything is correct. Once sent, the claim cannot be edited (only cancelled).')}</p>
+      ${d.map((x, i) => `<div class="card" style="margin-bottom:8px;padding:12px"><div class="row between"><b>${i + 1}. ${esc(catLabel(x.cat))}</b><b style="color:var(--gold)">${money(x.amount)}</b></div>
+        <div class="small muted">${fmtDate(x.date)}${x.qty ? ` · ${x.qty} ${UNIT[CLAIM_CATS().find(c => c.k === x.cat)?.unit]?.() || ''}${x.rate ? ' × ' + money(x.rate) : ''}` : ''}${x.inv ? ' · ' + L('No.', 'No.') + ' ' + esc(x.inv) : ''}</div>
+        ${x.desc ? `<div class="small">${esc(x.desc)}</div>` : ''}${x.photo ? `<img src="${x.photo}" style="max-width:90px;border-radius:8px;margin-top:6px">` : ''}</div>`).join('')}
+      <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>${L('JUMLAH TUNTUTAN', 'TOTAL CLAIM')}</b><b style="font-size:1.4rem;color:var(--gold)">${money(total)}</b></div></div>
+      ${noPhoto ? `<p class="small" style="color:var(--warn);margin-top:.6rem">⚠ ${noPhoto} ${L('item tiada gambar resit.', 'item(s) have no receipt photo.')}</p>` : ''}
+      <label class="check" style="margin-top:.8rem"><input type="checkbox" id="rcOk">${L('Saya mengesahkan semua maklumat di atas adalah benar.', 'I confirm all the information above is true.')}</label>`,
+    actions: [
+      { label: L('Kembali ubah', 'Back to edit'), onClick: () => { setTimeout(claimScreen, 60); } },
+      {
+        label: L('Hantar untuk kelulusan', 'Submit for approval'), cls: 'btn-primary', onClick: async ({ el }) => {
+          if (!$('#rcOk', el).checked) { toast(L('Sila tandakan pengesahan.', 'Please tick the confirmation.'), 'warn'); return false; }
+          const size = JSON.stringify(d).length;
+          if (size > 850000) { toast(L('Gambar terlalu besar. Kurangkan item atau gambar.', 'Photos too large. Reduce items or photos.'), 'bad', 5000); return false; }
+          const cats = [...new Set(d.map(x => catLabel(x.cat)))];
+          try {
+            await submitReq({ kind: 'claim', date: todayStr(), amount: total, category: cats.length === 1 ? cats[0] : `${d.length} ${L('item', 'items')}`, items: d, reason: cats.join(', ') });
+            setDraft([]);
+          } catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
 }
 
 function swapForm() {
