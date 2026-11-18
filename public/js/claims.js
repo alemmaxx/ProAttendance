@@ -27,7 +27,8 @@ export const SST_CATS = () => [
 
 export const STATUS = {
   draft: () => [L('Draf', 'Draft'), ''],
-  submitted: () => [L('Menunggu kelulusan', 'Pending approval'), 'b-warn'],
+  submitted: () => [L('Menunggu semakan', 'Awaiting check'), 'b-warn'],
+  checked: () => [L('Disemak — menunggu kelulusan', 'Checked — awaiting approval'), 'b-warn'],
   approved: () => [L('Diluluskan', 'Approved'), 'b-ok'],
   rejected: () => [L('Ditolak', 'Rejected'), 'b-bad'],
   paid: () => [L('Dibayar', 'Paid'), 'b-info']
@@ -117,7 +118,8 @@ export function claimDocHtml(c, claim, files = {}) {
     <div class="hd">${c.logo ? `<img src="${c.logo}">` : ''}<div><b>${esc(c.name)}</b><div class="s">${esc(c.address || '')}</div></div></div>
     <h2>${title}</h2>
     <table class="meta"><tr><td>Claimant:</td><td><b>${esc(claim.name)}</b> (${esc(claim.workerId)})</td></tr><tr><td>Month:</td><td><b>${monthTxt(claim.month)}</b></td></tr></table>`;
-  const sign = () => `<div class="sign"><div>Approved by:<br><br>${claim.approvedBy ? `<b>${esc(claim.approvedBy)}</b><br><span class="s">${claim.approvedAt ? esc(claim.approvedAt) : ''}</span>` : '…………………………………………………..'}</div></div>`;
+  const who = (n, d) => n ? `<b>${esc(n)}</b><br><span class="s">${d ? esc(d) : ''}</span>` : '…………………………………………………..';
+  const sign = () => `<div class="sign"><div>Checked by:<br><br>${who(claim.checkedBy, claim.checkedAt)}</div><div>Approved by:<br><br>${who(claim.approvedBy, claim.approvedAt)}</div></div>`;
   const totRow = (label, v) => `<tr class="tt"><td colspan="2" class="r">${label}</td><td class="r">${n2(v)}</td></tr>`;
 
   // 1. CLAIM FORM
@@ -178,7 +180,7 @@ export function claimDocHtml(c, claim, files = {}) {
     .g th{background:#e9e9e9;font-size:9.5px} .r{text-align:right;white-space:nowrap} .c{text-align:center}
     .tt td{font-weight:bold;background:#f6f6f6}
     table.sum{margin:10px 0 0 auto;border-collapse:collapse;min-width:280px} .sum td{padding:3px 8px;border-bottom:1px solid #ccc} .sum .big td{font-size:13px;font-weight:bold;border-top:2px solid #000}
-    .sign{margin-top:22px}
+    .sign{margin-top:22px;display:flex;gap:60px}
     .pics{display:flex;flex-wrap:wrap;gap:10px} figure{margin:0;width:31%} figure img{width:100%;border:1px solid #ccc} figcaption{font-size:9px}
     .noprint{text-align:center;margin:10px} @media print{.noprint{display:none}}
   </style></head><body>
@@ -202,6 +204,7 @@ export function claimExcel(c, claim) {
     ['', '', '', '', '', '', '', '', '', '', '', 'Total Expenses ', '', X.totalExpenses],
     ['', '            Approved by:'],
     ['', claim.approvedBy || '…………………………………………………..'],
+    ['', 'Checked by: ' + (claim.checkedBy || '…………………………')],
     ['', '', '', '', '', '', '', '', '', '', 'Total (Allowance)', '', '', X.allowanceTotal],
     ['', '', '', '', '', '', '', '', '', '', 'Total (Claim)', '', '', X.claimTotal],
     ['', '', '', '', '', '', '', '', '', '', 'Claim Reimbursement', '', 'RM', X.reimbursement]];
@@ -233,4 +236,18 @@ export function claimExcel(c, claim) {
   XLSX.utils.book_append_sheet(wb, ws4, 'JUSTIFICATION FORM');
   XLSX.writeFile(wb, `Claim_${claim.workerId}_${claim.month}.xlsx`);
   return true;
+}
+
+// Garis masa status (untuk pekerja & admin)
+export function claimTimeline(cl) {
+  const st = cl.status || 'draft';
+  const rank = { draft: 0, rejected: 0, submitted: 1, checked: 2, approved: 3, paid: 4 }[st] ?? 0;
+  const steps = [
+    [L('Dihantar', 'Submitted'), ''],
+    [L('Disemak penyelia', 'Checked by supervisor'), cl.checkedBy ? `${cl.checkedBy}${cl.checkedAt ? ' · ' + cl.checkedAt : ''}` : ''],
+    [L('Diluluskan finance/boss', 'Approved by finance/boss'), cl.approvedBy ? `${cl.approvedBy}${cl.approvedAt ? ' · ' + cl.approvedAt : ''}` : ''],
+    [L('Dibayar', 'Paid'), cl.paidRef || '']
+  ];
+  return `<div class="tl">${steps.map(([t, d], i) => `<div class="tl-s ${i < rank ? 'done' : ''} ${i === rank ? 'now' : ''}"><span class="tl-d">${i < rank ? '✓' : i + 1}</span><div><b>${t}</b>${d && i < rank ? `<div class="xs muted">${esc(d)}</div>` : ''}</div></div>`).join('')}</div>`
+    + (st === 'rejected' ? `<p class="xs" style="color:var(--bad);margin:.3rem 0 0">${L('Ditolak — sila betulkan & hantar semula.', 'Rejected — please fix & resubmit.')}</p>` : '');
 }

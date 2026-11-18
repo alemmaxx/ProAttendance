@@ -23,7 +23,7 @@ import {
   computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2
 } from './payroll.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
-import { computeClaim, claimRates, CLAIM_RATE_DEFAULTS, claimDocHtml, claimExcel, statusBadge as claimBadge } from './claims.js';
+import { computeClaim, claimRates, CLAIM_RATE_DEFAULTS, claimDocHtml, claimExcel, statusBadge as claimBadge, claimTimeline } from './claims.js';
 
 const app = $('#app');
 const S = {
@@ -269,7 +269,7 @@ function startApp() {
   S.unsubs.push(onSnapshot(cRef(), (s) => {
     S.company = s.data();
     applyBrand(S.company);
-    if (first) { first = false; renderShell(); checkPayReturn(); if (!S.me.support) refreshPush(S.cid, S.user.uid, { role: 'admin', email: S.user.email || '' }); }
+    if (first) { first = false; renderShell(); checkPayReturn(); if (!S.me.support) refreshPush(S.cid, S.user.uid, { role: 'admin', email: S.user.email || '', perm: perm() }); }
     else { updateBrandBits(); checkPaywall(); }
   }, err => toast(authErr(err), 'bad')));
   S.unsubs.push(onSnapshot(sub('workers'), (s) => {
@@ -1375,7 +1375,7 @@ function viewSettings() {
     $('#pushRow').classList.remove('hide');
     if (Notification.permission === 'granted') $('#pushA').textContent = '✓ ' + L('Aktif', 'On');
     $('#pushA').onclick = async () => {
-      try { await enablePush(S.cid, S.user.uid, { role: 'admin', email: S.user.email || '' }); $('#pushA').textContent = '✓ ' + L('Aktif', 'On'); }
+      try { await enablePush(S.cid, S.user.uid, { role: 'admin', email: S.user.email || '', perm: perm() }); $('#pushA').textContent = '✓ ' + L('Aktif', 'On'); }
       catch { toast(L('Notifikasi tidak dibenarkan oleh pelayar.', 'Notifications blocked by the browser.'), 'warn'); }
     };
   });
@@ -2774,7 +2774,7 @@ async function viewClaims() {
   <div class="card no-print"><div class="row between">
     <div class="row"><label class="lbl" style="margin:0">${L('Bulan', 'Month')}</label><input type="month" class="input" id="clM" value="${S.clMonth}" style="width:auto"></div>
     <div class="row"><select class="input" id="clF" style="width:auto">
-      <option value="">${L('Semua status', 'All statuses')}</option><option value="submitted">${L('Menunggu kelulusan', 'Pending')}</option>
+      <option value="">${L('Semua status', 'All statuses')}</option><option value="submitted">${L('Menunggu semakan', 'Awaiting check')}</option><option value="checked">${L('Disemak, menunggu kelulusan', 'Checked, awaiting approval')}</option>
       <option value="approved">${L('Diluluskan', 'Approved')}</option><option value="paid">${L('Dibayar', 'Paid')}</option><option value="rejected">${L('Ditolak', 'Rejected')}</option><option value="draft">${L('Draf', 'Draft')}</option></select>
       <button class="btn btn-sm btn-ghost" id="clX">${icon('dl', 16)} ${L('Ringkasan Excel', 'Summary Excel')}</button></div>
   </div></div>
@@ -2785,14 +2785,15 @@ async function viewClaims() {
     const s = await getDocs(query(sub('claims'), where('month', '==', S.clMonth)));
     list = s.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) { $('#clOut').innerHTML = `<div class="card"><div class="empty">${esc(authErr(e))}</div></div>`; return; }
-  const order = { submitted: 0, approved: 1, rejected: 2, paid: 3, draft: 4 };
+  const order = isSupervisor() ? { submitted: 0, checked: 1, approved: 2, rejected: 3, paid: 4, draft: 5 } : { checked: 0, submitted: 1, approved: 2, rejected: 3, paid: 4, draft: 5 };
   const draw = () => {
     const f = $('#clF').value;
     const rows = list.filter(x => !f || x.status === f).sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || (a.workerId || '').localeCompare(b.workerId || ''));
     const tot = (st) => list.filter(x => st.includes(x.status)).reduce((a, x) => a + computeClaim(x, S.company).reimbursement, 0);
     $('#clOut').innerHTML = `
       <div class="stats">
-        <div class="stat warn"><div class="n" style="font-size:1.15rem">${money(tot(['submitted']))}</div><div class="t">${L('Menunggu kelulusan', 'Pending')}</div></div>
+        <div class="stat warn"><div class="n" style="font-size:1.15rem">${money(tot(['submitted']))}</div><div class="t">${L('Menunggu semakan penyelia', 'Awaiting supervisor check')}</div></div>
+        <div class="stat warn"><div class="n" style="font-size:1.15rem">${money(tot(['checked']))}</div><div class="t">${L('Menunggu kelulusan finance/boss', 'Awaiting finance/boss approval')}</div></div>
         <div class="stat info"><div class="n" style="font-size:1.15rem">${money(tot(['approved']))}</div><div class="t">${L('Lulus, belum dibayar', 'Approved, unpaid')}</div></div>
         <div class="stat ok"><div class="n" style="font-size:1.15rem">${money(tot(['paid']))}</div><div class="t">${L('Dibayar', 'Paid')}</div></div>
       </div>
@@ -2807,8 +2808,8 @@ async function viewClaims() {
   $('#clF').onchange = draw;
   $('#clX').onclick = () => {
     if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
-    const aoa = [[S.company.name], [`Claims ${S.clMonth}`], [], ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/Overnight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total Expenses', 'Total (Allowance)', 'Claim Reimbursement', 'Approved by', 'Paid ref']];
-    list.forEach(x => { const X = computeClaim(x, S.company); aoa.push([x.workerId, x.name, x.status, X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others, X.totalExpenses, X.allowanceTotal, X.reimbursement, x.approvedBy || '', x.paidRef || '']); });
+    const aoa = [[S.company.name], [`Claims ${S.clMonth}`], [], ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/Overnight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total Expenses', 'Total (Allowance)', 'Claim Reimbursement', 'Checked by', 'Approved by', 'Paid ref']];
+    list.forEach(x => { const X = computeClaim(x, S.company); aoa.push([x.workerId, x.name, x.status, X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others, X.totalExpenses, X.allowanceTotal, X.reimbursement, x.checkedBy || '', x.approvedBy || '', x.paidRef || '']); });
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), S.clMonth);
     XLSX.writeFile(wb, `Claims_${S.company.code}_${S.clMonth}.xlsx`);
   };
@@ -2828,6 +2829,7 @@ function openClaimAdmin(cl, after) {
     title: `${esc(cl.name)} · ${esc(cl.month)}`, wide: true,
     body: `
       <div class="row between" style="margin-bottom:.6rem">${claimBadge(cl.status)}<span class="xs muted">${cl.submittedAt ? L('Dihantar', 'Submitted') + ' ' + fmtDateTime(cl.submittedAt) : ''}</span></div>
+      ${claimTimeline(cl)}
       <div class="stats">
         <div class="stat"><div class="n" style="font-size:1.1rem">${money(X.claimTotal)}</div><div class="t">Total (Claim)</div></div>
         <div class="stat info"><div class="n" style="font-size:1.1rem">${money(X.allowanceTotal)}</div><div class="t">Total (Allowance)</div></div>
@@ -2842,26 +2844,46 @@ function openClaimAdmin(cl, after) {
         <div class="set-row"><span>Total (Allowance)</span><b>${money(X.allowanceTotal)}</b></div>
         <div class="set-row"><span>Total (Claim)</span><b>${money(X.claimTotal)}</b></div>
         <div class="set-row"><span><b>Claim Reimbursement</b></span><b style="color:var(--gold)">${money(X.reimbursement)}</b></div></div></div>
-      ${cl.approvedBy ? `<p class="small">✓ ${L('Diluluskan oleh', 'Approved by')} <b>${esc(cl.approvedBy)}</b> · ${esc(cl.approvedAt || '')}</p>` : ''}
       ${cl.adminNote ? `<p class="small">💬 ${esc(cl.adminNote)}</p>` : ''}
       <div class="row" style="margin-top:.6rem">
         <button class="btn btn-ghost" id="cDoc">${icon('print', 16)} ${L('Dokumen penuh / PDF', 'Full document / PDF')}</button>
         <button class="btn btn-ghost" id="cXl">${icon('dl', 16)} Excel</button>
       </div>`,
     actions: [
-      ...(cl.status === 'submitted' ? [
+      ...(isSupervisor() && cl.status === 'submitted' ? [
+        { label: L('Tolak', 'Reject'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
+        { label: L('Semak & hantar ke finance', 'Check & send to finance'), cls: 'btn-ok', autoClose: false, onClick: () => { decideClaim('check'); return false; } }] : []),
+      ...(!isSupervisor() && cl.status === 'submitted' ? [
+        { label: L('Tolak', 'Reject'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
+        { label: L('Semak', 'Check'), cls: 'btn-ghost', autoClose: false, onClick: () => { decideClaim('check'); return false; } },
+        { label: L('Lulus terus', 'Approve directly'), cls: 'btn-ok', autoClose: false, onClick: () => { decideClaim(true); return false; } }] : []),
+      ...(!isSupervisor() && cl.status === 'checked' ? [
         { label: L('Tolak', 'Reject'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
         { label: L('Lulus', 'Approve'), cls: 'btn-ok', autoClose: false, onClick: () => { decideClaim(true); return false; } }] : []),
-      ...(cl.status === 'approved' ? [
+      ...(!isSupervisor() && cl.status === 'approved' ? [
         { label: L('Tolak / minta edit', 'Reject / request edit'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
         { label: L('Tanda sudah dibayar', 'Mark as paid'), cls: 'btn-primary', autoClose: false, onClick: () => { markPaid(); return false; } }] : []),
-      ...(cl.status === 'paid' ? [{ label: L('Batal status dibayar', 'Undo paid'), cls: 'btn-ghost', autoClose: false, onClick: () => { undoPaid(); return false; } }] : []),
+      ...(!isSupervisor() && cl.status === 'paid' ? [{ label: L('Batal status dibayar', 'Undo paid'), cls: 'btn-ghost', autoClose: false, onClick: () => { undoPaid(); return false; } }] : []),
       { label: L('Tutup', 'Close') }
     ]
   });
   $('#cDoc', m.el).onclick = async () => { const f = await claimFiles(cl); openPrint(claimDocHtml(S.company, cl, f), false) || toast(L('Benarkan pop-up.', 'Allow pop-ups.'), 'warn'); };
   $('#cXl', m.el).onclick = () => claimExcel(S.company, cl) || toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
-  const decideClaim = (ok) => modal({
+  const decideClaim = (ok) => ok === 'check' ? modal({
+    title: L('Semak tuntutan', 'Check claim'),
+    body: `<p class="small">${esc(cl.name)} · ${esc(cl.month)} · <b>${money(X.reimbursement)}</b></p>
+      <p class="xs muted">${L('Selepas disemak, tuntutan dihantar kepada finance/boss untuk kelulusan.', 'After checking, the claim goes to finance/boss for approval.')}</p>
+      <div class="field"><label class="lbl">${L('Disemak oleh (nama)', 'Checked by (name)')}</label><input class="input" id="dBy" value="${esc(S.user.displayName || S.user.email || '')}"></div>
+      <div class="field"><label class="lbl">${L('Catatan (pilihan)', 'Note (optional)')}</label><textarea class="input" id="dN" maxlength="300" style="min-height:60px"></textarea></div>`,
+    actions: [{ label: L('Batal', 'Cancel') }, {
+      label: L('Hantar ke finance', 'Send to finance'), cls: 'btn-ok', onClick: async ({ el }) => {
+        try {
+          await updateDoc(ref, { status: 'checked', checkedBy: $('#dBy', el).value.trim() || S.user.email || '', checkedAt: todayStr().split('-').reverse().join('/'), adminNote: $('#dN', el).value.trim(), decidedAt: serverTimestamp() });
+          logAct('claim.check', cl.id); toast(L('Dihantar ke finance.', 'Sent to finance.')); m.close(); after && after();
+        } catch (e) { toast(authErr(e), 'bad'); return false; }
+      }
+    }]
+  }) : modal({
     title: ok ? L('Luluskan tuntutan', 'Approve claim') : L('Tolak tuntutan', 'Reject claim'),
     body: `<p class="small">${esc(cl.name)} · ${esc(cl.month)} · <b>${money(X.reimbursement)}</b></p>
       ${ok ? `<div class="field"><label class="lbl">${L('Diluluskan oleh (nama)', 'Approved by (name)')}</label><input class="input" id="dBy" value="${esc(S.user.displayName || S.user.email || '')}"></div>` : ''}
@@ -2873,7 +2895,7 @@ function openClaimAdmin(cl, after) {
         try {
           await updateDoc(ref, ok
             ? { status: 'approved', approvedBy: $('#dBy', el).value.trim() || S.user.email || '', approvedAt: todayStr().split('-').reverse().join('/'), decidedAt: serverTimestamp(), adminNote: note }
-            : { status: 'rejected', adminNote: note, decidedAt: serverTimestamp(), approvedBy: '', approvedAt: '' });
+            : { status: 'rejected', adminNote: note, decidedAt: serverTimestamp(), approvedBy: '', approvedAt: '', checkedBy: '', checkedAt: '' });
           logAct(ok ? 'claim.approve' : 'claim.reject', cl.id);
           toast(ok ? L('Diluluskan.', 'Approved.') : L('Ditolak.', 'Rejected.'));
           m.close(); after && after();

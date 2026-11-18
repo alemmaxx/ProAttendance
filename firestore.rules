@@ -231,7 +231,11 @@ service cloud.firestore {
                           && request.resource.data.uid == request.auth.uid
                           && request.resource.data.status in ['draft', 'submitted'])
                       || (isFullAdmin(cid) && request.resource.data.demo == true);
-        allow update: if isAdminOf(cid)
+        // Penyelia: semak (submitted → checked) atau tolak sahaja. Finance/boss (owner/manager): semua.
+        allow update: if isFullAdmin(cid)
+                      || (isAdminOf(cid) && resource.data.status == 'submitted'
+                          && request.resource.data.status in ['checked', 'rejected']
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'checkedBy', 'checkedAt', 'adminNote', 'decidedAt', 'approvedBy', 'approvedAt']))
                       || (isWorkerOf(cid) && resource.data.uid == request.auth.uid
                           && resource.data.status in ['draft', 'rejected']
                           && request.resource.data.uid == request.auth.uid

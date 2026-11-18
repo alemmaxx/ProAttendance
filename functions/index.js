@@ -6,7 +6,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const { getMessaging } = require('firebase-admin/messaging');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 
 initializeApp();
 const db = getFirestore('proattendance');
@@ -236,6 +236,32 @@ exports.pa_onRequestUpdated = onDocumentUpdated(TRIG('companies/{cid}/requests/{
   await sendTo(e.params.cid, t => t.id === a.uid,
     a.status === 'approved' ? 'Permohonan diluluskan ✓' : 'Permohonan ditolak',
     `${KIND[a.kind] || a.kind}${a.adminNote ? ' — ' + a.adminNote : ''}`, '/index.html');
+});
+
+// Borang tuntutan bulanan: hantar → semak penyelia → lulus finance/boss → dibayar
+exports.pa_onClaim = onDocumentWritten(TRIG('companies/{cid}/claims/{id}'), async (e) => {
+  const b = e.data?.before?.exists ? e.data.before.data() : null, a = e.data?.after?.exists ? e.data.after.data() : null;
+  if (!a || (b && b.status === a.status)) return;
+  const cid = e.params.cid, mo = a.month || '', who = `${a.name || ''} (${a.workerId || ''})`;
+  const full = t => t.role === 'admin' && t.perm !== 'supervisor';
+  if (a.status === 'submitted') {
+    await sendTo(cid, t => t.role === 'admin', 'Tuntutan baharu untuk disemak', `${who} · ${mo}`, '/admin.html');
+  } else if (a.status === 'checked') {
+    await sendTo(cid, full, 'Tuntutan menunggu kelulusan', `${who} · ${mo} · disemak oleh ${a.checkedBy || 'penyelia'}`, '/admin.html');
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan disemak ✓', `Tuntutan ${mo} sudah disemak penyelia dan dihantar ke finance.`, '/index.html');
+  } else if (a.status === 'approved') {
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan diluluskan ✓', `Tuntutan ${mo} diluluskan${a.approvedBy ? ' oleh ' + a.approvedBy : ''}.`, '/index.html');
+  } else if (a.status === 'rejected') {
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan ditolak', `Tuntutan ${mo}${a.adminNote ? ' — ' + a.adminNote : ''}. Sila betulkan & hantar semula.`, '/index.html');
+  } else if (a.status === 'paid') {
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan dibayar 💰', `Tuntutan ${mo} sudah dibayar${a.paidRef ? ' (' + a.paidRef + ')' : ''}.`, '/index.html');
+  }
+});
+
+// Slip gaji diterbitkan
+exports.pa_onPayslip = onDocumentCreated(TRIG('companies/{cid}/payslips/{id}'), async (e) => {
+  const x = e.data?.data(); if (!x || !x.uid) return;
+  await sendTo(e.params.cid, t => t.id === x.uid, 'Slip gaji baharu', `Slip gaji ${x.period || ''} sudah tersedia.`, '/index.html');
 });
 
 exports.pa_onAnnouncement = onDocumentCreated(TRIG('companies/{cid}/announcements/{aid}'), async (e) => {

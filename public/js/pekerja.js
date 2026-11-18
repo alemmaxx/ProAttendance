@@ -16,7 +16,7 @@ import {
   leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween, submitAutoOT, weekStart
 } from './sched.js';
 import { payslipHtml, openPrint, periodLabel } from './payroll.js';
-import { computeClaim, claimRates, SST_CATS, journeyTotal, purchaseTotal, allowanceTotal, claimDocHtml, statusBadge, emptyClaim } from './claims.js';
+import { claimTimeline, computeClaim, claimRates, SST_CATS, journeyTotal, purchaseTotal, allowanceTotal, claimDocHtml, statusBadge, emptyClaim } from './claims.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
 import { money } from './ui.js';
 
@@ -983,6 +983,7 @@ function claimEditor(month, tab = 'j') {
         <input type="month" class="input" id="cm" value="${month}" style="width:auto">
         <span>${statusBadge(cl.status || 'draft')}</span>
       </div>
+      ${claimTimeline(cl)}
       ${cl.status === 'rejected' && cl.adminNote ? `<div class="card" style="border-color:var(--bad);margin-bottom:10px"><b style="color:var(--bad)">${L('Ditolak', 'Rejected')}:</b> ${esc(cl.adminNote)}<div class="xs muted">${L('Betulkan dan hantar semula.', 'Fix and resubmit.')}</div></div>` : ''}
       <div class="stats">
         <div class="stat"><div class="n" style="font-size:1.1rem">${money(X.claimTotal)}</div><div class="t">Total (Claim)</div></div>
@@ -1333,6 +1334,11 @@ function viewProfil() {
     ${row(L('Telefon', 'Phone'), w.phone)}
     ${row(L('Syarikat', 'Company'), S.company.name)}
   </div>
+  <div class="card"><h3>${L('Status Tuntutan', 'Claim Status')}</h3>${(() => {
+    const ms = Object.keys(S.claims || {}).sort().reverse().slice(0, 6);
+    return ms.length ? ms.map(mo => { const c = S.claims[mo]; return `<div class="set-row" data-myc="${mo}" style="cursor:pointer"><div><b>${esc(periodLabel(mo))}</b><div class="small muted">${money(computeClaim(c, S.company).reimbursement)}</div></div>${statusBadge(c.status || 'draft')}</div>`; }).join('')
+      : `<div class="empty small">${L('Belum ada tuntutan.', 'No claims yet.')}</div>`;
+  })()}</div>
   <div class="card"><h3>${L('Slip Gaji', 'Payslips')}</h3><div id="slips"><div class="loader" style="min-height:60px"><span class="spin"></span></div></div></div>
   <div class="card stack">
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
@@ -1343,6 +1349,7 @@ function viewProfil() {
   </div>
   <p class="center xs muted" style="margin-top:1rem">ProAttendance</p>`;
   $('#chPin').onclick = () => pinModal(false);
+  $$('[data-myc]').forEach(r => r.onclick = () => claimEditor(r.dataset.myc, 's'));
   pushAvailable().then(ok => {
     const b = $('#pushB'); if (!ok || !b) return;
     b.classList.remove('hide');

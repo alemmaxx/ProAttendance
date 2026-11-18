@@ -285,3 +285,12 @@ td .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;cursor:poin
 .cal-f{background:transparent}
 .cal-today{box-shadow:0 0 0 2px var(--gold) inset}
 .cal-k{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+
+/* Garis masa tuntutan */
+.tl{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:.4rem 0 .8rem}
+.tl-s{display:flex;gap:6px;align-items:flex-start;font-size:.78rem;opacity:.55}
+.tl-s.done,.tl-s.now{opacity:1}
+.tl-d{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.72rem;background:var(--card2);border:1px solid var(--line)}
+.tl-s.done .tl-d{background:var(--gold);color:#1a1405;border-color:var(--gold)}
+.tl-s.now .tl-d{border-color:var(--gold);color:var(--gold)}
+@media(max-width:560px){.tl{grid-template-columns:1fr 1fr}}
