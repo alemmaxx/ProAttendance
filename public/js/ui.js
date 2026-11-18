@@ -330,16 +330,30 @@ export async function verifyQr(text, cid, locations) {
 }
 
 // ---------- Jenama syarikat (white-label) ----------
+export const DEFAULT_BRAND = '#d9b44a';
 export function applyBrand(c) {
   if (!c) return;
-  const color = /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '#1d4ed8';
-  document.documentElement.style.setProperty('--brand', color);
-  document.documentElement.style.setProperty('--brand-dark', shade(color, -0.25));
-  document.documentElement.style.setProperty('--brand-soft', shade(color, 0.88));
+  // '#1d4ed8' ialah warna lalai lama — anggap sebagai belum dipilih (guna emas)
+  let color = /^#[0-9a-f]{6}$/i.test(c.color || '') && c.color.toLowerCase() !== '#1d4ed8' ? c.color : DEFAULT_BRAND;
+  const n = parseInt(color.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const root = document.documentElement.style;
+  root.setProperty('--brand', color);
+  root.setProperty('--gold', color);
+  root.setProperty('--on-brand', lum > 0.55 ? '#1b1503' : '#ffffff');
+  root.setProperty('--brand-dark', shade(color, -0.2));
+  root.setProperty('--brand-soft', mix(color, '#0a1210', 0.18));
+  root.setProperty('--gold2', mix(color, '#0a1210', 0.18));
   const meta = document.querySelector('meta[name=theme-color]');
-  if (meta) meta.content = color;
+  if (meta) meta.content = '#0a1210';
   $$('[data-brand-name]').forEach(el => el.textContent = c.name || '');
   $$('[data-brand-logo]').forEach(el => { el.innerHTML = logoHtml(c); });
+}
+export function mix(hex, base, p) {
+  const a = parseInt(hex.slice(1), 16), b = parseInt(base.slice(1), 16);
+  const ch = (x, y) => Math.round(x * p + y * (1 - p));
+  const r = ch(a >> 16, b >> 16), g = ch((a >> 8) & 255, (b >> 8) & 255), bl = ch(a & 255, b & 255);
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1);
 }
 export function logoHtml(c, cls = 'logo') {
   if (c && c.logo) return `<img class="${cls}" src="${c.logo}" alt="">`;

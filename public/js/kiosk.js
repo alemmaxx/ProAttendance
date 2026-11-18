@@ -85,9 +85,9 @@ function renderKiosk(c) {
       <div class="kfield" id="fpin"></div>
     </div>
     <div class="kpad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-k="${n}">${n}</button>`).join('')}
-      <button data-k="del">⌫</button><button data-k="0">0</button><button data-k="ok" style="background:#16a34a">OK</button></div>
+      <button data-k="del">⌫</button><button data-k="0">0</button><button data-k="ok" style="background:var(--gold);color:var(--on-brand)">OK</button></div>
     <button class="btn btn-ghost" id="kscan" style="margin-top:.4rem">${icon('qr', 18)} ${L('Imbas kad pekerja', 'Scan staff card')}</button>
-    <button class="link-btn xs" id="kreset" style="color:rgba(255,255,255,.6);margin-top:1rem">${L('Tetapan kiosk', 'Kiosk settings')}</button>
+    <button class="link-btn xs" id="kreset" style="color:var(--muted);margin-top:1rem">${L('Tetapan kiosk', 'Kiosk settings')}</button>
   </div>`;
   const draw = () => {
     $('#fid').textContent = idVal ? c.code + idVal : c.code + '…';

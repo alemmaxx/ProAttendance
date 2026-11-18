@@ -13,7 +13,7 @@ import {
 
 const app = $('#app');
 const S = { user: null, view: 'companies', companies: [], payments: [], plans: {} };
-applyBrand({ color: '#0f172a' });
+applyBrand({ color: '#d9b44a' });
 
 function renderLogin() {
   app.innerHTML = `
@@ -93,7 +93,7 @@ function renderShell() {
     <div class="main">
       <header class="topbar"><button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button><h1 id="vTitle"></h1>
         <a class="btn btn-sm btn-soft" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Syarikat saya / Demo', 'My company / Demo')}</a></header>
-      <div class="content" id="view"></div>
+      <div class="content"><div class="pghero no-print"><div class="tag" id="vTag"></div><h2 class="gold-h" id="vH"></h2><p class="sub" id="vSub"></p></div><div id="view"></div></div>
     </div>
   </div>`;
   $$('.side nav button').forEach(b => b.onclick = () => { go(b.dataset.v); $('#side').classList.remove('open'); $('#sideBg').classList.remove('open'); });
@@ -108,6 +108,9 @@ function go(v) {
   S.view = v;
   $$('.side nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $('#vTitle').textContent = NAV().find(n => n[0] === v)[2];
+  $('#vTag').textContent = '✦ Super Admin';
+  $('#vH').textContent = NAV().find(n => n[0] === v)[2] + '.';
+  $('#vSub').textContent = 'ProAttendance';
   ({ companies: viewCompanies, plans: viewPlans, payments: viewPayments, stats: viewStats, promos: viewPromos, agents: viewAgents, kit: viewKit })[v]();
 }
 
@@ -399,7 +402,7 @@ Daftar: ${link}`],
 [25-30s] "Cuba percuma ${td} hari. Link di bio!"`]
   ];
   $('#view').innerHTML = texts.map(([t, x], i) => `<div class="card"><div class="card-head"><h3>${t}</h3><button class="btn btn-sm btn-soft" data-kc="${i}">${L('Salin', 'Copy')}</button></div>
-    <pre style="white-space:pre-wrap;font-family:inherit;margin:0;background:#f8fafc;padding:.8rem;border-radius:10px">${esc(x)}</pre></div>`).join('')
+    <pre style="white-space:pre-wrap;font-family:inherit;margin:0;background:var(--card2);padding:.8rem;border-radius:10px;border:1px solid var(--line)">${esc(x)}</pre></div>`).join('')
     + `<div class="card small"><b>${L('Pautan landing page', 'Landing page link')}:</b> <a href="${link}" target="_blank">${link}</a></div>`;
   $$('[data-kc]').forEach(b => b.onclick = () => copyText(texts[Number(b.dataset.kc)][1]));
 }

@@ -60,7 +60,7 @@ const opts = (arr, sel) => arr.map(([v, t]) => `<option value="${esc(v)}" ${v ==
 // ================================================================ AUTH
 function renderAuth(mode = 'login') {
   stopAll();
-  applyBrand({ color: '#1d4ed8' });
+  applyBrand({ color: '#d9b44a' });
   const titles = {
     login: L('Log Masuk Majikan', 'Employer Login'),
     register: L('Daftar Akaun Baharu', 'Create New Account'),
@@ -226,12 +226,12 @@ function renderOnboarding(extra = false) {
       try { ref = (localStorage.getItem('pa_ref') || '').toUpperCase().slice(0, 20); } catch {}
       b.set(newRef, {
         name, code, phone: $('#cp').value.trim(), ownerUid: S.user.uid, ownerEmail: S.user.email || '', ref,
-        logo: '', address: '', ssm: '', color: '#1d4ed8',
+        logo: '', address: '', ssm: '', color: '#d9b44a',
         status: 'trial', plan: 'trial', expiry, createdAt: serverTimestamp(), seq: 0, workerCount: 0,
         settings: { workStart: '09:00', workEnd: '18:00', grace: 10, workDays: [1, 2, 3, 4, 5], selfie: true, oneDevice: false },
         departments: [], allowanceTemplates: []
       });
-      b.set(doc(db, 'companyCodes', code), { cid: newRef.id, name, logo: '', color: '#1d4ed8' });
+      b.set(doc(db, 'companyCodes', code), { cid: newRef.id, name, logo: '', color: '#d9b44a' });
       if (extra) {
         const cids = [...new Set([...(S.me.cids || [S.me.cid]), newRef.id])];
         b.update(doc(db, 'users', S.user.uid), { cid: newRef.id, cids });
@@ -310,8 +310,8 @@ function renderShell() {
     <aside class="side" id="side">
       <div class="side-brand"><span data-brand-logo>${logoHtml(c)}</span>
         <div><div class="nm" data-brand-name>${esc(c.name)}</div><div class="xs" style="opacity:.7">${esc(c.code)} · ${S.me.support ? 'Super Admin' : ({ owner: L('Pemilik', 'Owner'), manager: L('Pengurus', 'Manager'), supervisor: L('Penyelia', 'Supervisor') })[perm()]}</div></div></div>
-      ${S.me.support ? `<div style="background:#b45309;color:#fff;padding:.5rem .8rem;font-size:.8rem;font-weight:700">${L('MOD SOKONGAN', 'SUPPORT MODE')} · <a href="/superadmin.html" style="color:#fff">${L('Kembali', 'Back')}</a></div>` : ''}
-      ${isOwner() && !S.me.support ? `<div style="padding:.5rem .8rem"><select class="input" id="coSwitch" style="background:#1e293b;color:#fff;border-color:#334155;font-size:.82rem;padding:.4rem"></select></div>` : ''}
+      ${S.me.support ? `<div style="background:var(--warn-soft);color:var(--warn);padding:.5rem 1rem;font-size:.8rem;font-weight:700;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">${L('MOD SOKONGAN', 'SUPPORT MODE')} · <a href="/superadmin.html" style="color:var(--warn)">${L('Kembali', 'Back')}</a></div>` : ''}
+      ${isOwner() && !S.me.support ? `<div style="padding:.5rem .8rem"><select class="input" id="coSwitch" style="font-size:.85rem;padding:.4rem .6rem;min-height:38px"></select></div>` : ''}
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
         <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div>
@@ -325,7 +325,7 @@ function renderShell() {
         <h1 id="vTitle"></h1>
         <span id="subBadge"></span>
       </header>
-      <div class="content" id="view"></div>
+      <div class="content"><div class="pghero no-print"><div class="tag" id="vTag"></div><h2 class="gold-h" id="vH"></h2><p class="sub" id="vSub"></p></div><div id="view"></div></div>
     </div>
   </div>`;
   $$('.side nav button').forEach(b => b.onclick = () => { go(b.dataset.v); closeSide(); });
@@ -382,6 +382,23 @@ function go(v) {
   $$('.side nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   const t = NAV().find(n => n[0] === v);
   $('#vTitle').textContent = t ? t[2] : '';
+  const H = {
+    dashboard: [L('Kehadiran hari ini.', "Today's attendance."), fmtDate(todayStr(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })],
+    workers: [L('Senarai pekerja.', 'Your staff.'), L('Tambah pekerja, elaun (+), potongan & kad pekerja.', 'Add staff, allowances (+), deductions & staff cards.')],
+    roster: [L('Syif & jadual.', 'Shifts & roster.'), L('Templat syif dan jadual mingguan setiap pekerja.', 'Shift templates and each staff weekly roster.')],
+    approvals: [L('Kelulusan.', 'Approvals.'), L('Cuti, OT, pembetulan punch, tuntutan, pendahuluan & tukar syif.', 'Leave, OT, punch fixes, claims, advances & shift swaps.')],
+    tasks: [L('Tugasan harian.', 'Daily tasks.'), L('Beri tugasan dan semak yang sudah siap.', 'Assign tasks and check what is done.')],
+    payroll: [L('Gaji pekerja.', 'Payroll.'), L('Jana, semak, kunci & terbit slip gaji.', 'Generate, review, lock & publish payslips.')],
+    hr: [L('Fail HR.', 'HR files.'), L('Dokumen, amaran, prestasi, aset, pinjaman & onboarding.', 'Documents, warnings, reviews, assets, loans & onboarding.')],
+    locations: [L('Lokasi kerja.', 'Work locations.'), L('Cawangan, geofence, kod QR & mod kiosk.', 'Branches, geofence, QR codes & kiosk mode.')],
+    reports: [L('Laporan.', 'Reports.'), L('Kehadiran, cuti, lewat & OT — Excel / PDF.', 'Attendance, leave, lateness & OT — Excel / PDF.')],
+    news: [L('Pengumuman.', 'Announcements.'), L('Mesej & undian kepada semua pekerja.', 'Messages & polls to all staff.')],
+    settings: [L('Tetapan.', 'Settings.'), L('Profil syarikat, waktu kerja, cuti & admin.', 'Company profile, work hours, leave & admins.')],
+    billing: [L('Langganan.', 'Subscription.'), L('Pakej, bayaran & kod promo.', 'Plans, payments & promo codes.')]
+  }[v] || [t ? t[2] + '.' : '', ''];
+  $('#vTag').textContent = '✦ ' + (S.company?.name || '');
+  $('#vH').textContent = H[0];
+  $('#vSub').textContent = H[1];
   ({ dashboard: viewDashboard, workers: viewWorkers, locations: viewLocations, reports: viewReports,
      news: viewNews, settings: viewSettings, billing: viewBilling, roster: viewRoster, approvals: viewApprovals, payroll: viewPayroll, tasks: viewTasks, hr: viewHR })[v]();
   window.scrollTo(0, 0);
@@ -450,7 +467,7 @@ function viewDashboard() {
   const t = todayStr();
   v.innerHTML = `
     <div class="row between" style="margin-bottom:.8rem">
-      <div><h2 style="margin:0">${L('Hari ini', 'Today')}</h2><div class="muted small">${fmtDate(t, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
+      <span></span>
       <div class="row"><button class="btn btn-ok btn-sm" id="waSum">${icon('chat', 16)} ${L('Kongsi ringkasan', 'Share summary')}</button>
       <button class="btn btn-soft btn-sm" data-goto="reports">${icon('chart', 16)} ${L('Laporan', 'Reports')}</button></div>
     </div>
@@ -1146,7 +1163,7 @@ function viewSettings() {
       <div class="field"><label class="lbl">${L('Nama syarikat', 'Company name')}</label><input class="input" id="sName" value="${esc(c.name)}"></div>
       <div class="field"><label class="lbl">${L('No. pendaftaran (SSM)', 'Registration no. (SSM)')}</label><input class="input" id="sSsm" value="${esc(c.ssm || '')}"></div>
       <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')}</label><input class="input" id="sPhone" value="${esc(c.phone || '')}"></div>
-      <div class="field"><label class="lbl">${L('Warna tema', 'Theme colour')}</label><input class="input" type="color" id="sColor" value="${esc(c.color || '#1d4ed8')}" style="height:44px;padding:.2rem"></div>
+      <div class="field"><label class="lbl">${L('Warna tema', 'Theme colour')}</label><input class="input" type="color" id="sColor" value="${esc(c.color && c.color.toLowerCase() !== '#1d4ed8' ? c.color : '#d9b44a')}" style="height:46px;padding:.2rem"></div>
     </div>
     <div class="field"><label class="lbl">${L('Alamat', 'Address')}</label><textarea class="input" id="sAddr" style="min-height:70px">${esc(c.address || '')}</textarea></div>
     <button class="btn btn-primary" id="saveProf">${L('Simpan Profil', 'Save Profile')}</button>
@@ -1539,7 +1556,7 @@ async function drawWeek() {
         const val = roster[d]?.[w.id] || '';
         const leave = lv[w.id]?.[d];
         return `<td style="min-width:118px">
-          <select class="input" data-cell="${esc(w.id)}|${d}" style="padding:.35rem .4rem;font-size:.8rem;${val === 'off' ? 'background:#f1f5f9' : val ? 'background:var(--brand-soft)' : ''}">
+          <select class="input" data-cell="${esc(w.id)}|${d}" style="padding:.35rem .4rem;font-size:.8rem;${val === 'off' ? 'background:var(--card2);color:var(--muted)' : val ? 'background:var(--brand-soft);color:var(--gold)' : ''}">
             <option value="">${L('Ikut biasa', 'Default')} (${esc(defLabel(w, d))})</option>
             ${tpls.map(t => `<option value="${esc(t.id)}" ${val === t.id ? 'selected' : ''}>${esc(t.name)} ${esc(t.start)}</option>`).join('')}
             <option value="off" ${val === 'off' ? 'selected' : ''}>${L('Rehat', 'Rest')}</option>
@@ -1550,7 +1567,7 @@ async function drawWeek() {
   $$('[data-cell]').forEach(sel => sel.onchange = async () => {
     const [w, d] = sel.dataset.cell.split('|');
     const v = sel.value;
-    sel.style.background = v === 'off' ? '#f1f5f9' : v ? 'var(--brand-soft)' : '';
+    sel.style.background = v === 'off' ? 'var(--card2)' : v ? 'var(--brand-soft)' : ''; sel.style.color = v === 'off' ? 'var(--muted)' : v ? 'var(--gold)' : '';
     try { await setDoc(doc(db, 'companies', S.cid, 'roster', d), { a: { [w]: v || deleteField() } }, { merge: true }); }
     catch (e) { toast(authErr(e), 'bad'); }
   });
