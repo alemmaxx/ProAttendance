@@ -7,18 +7,23 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where, orderBy, limit,
-  onSnapshot, serverTimestamp, writeBatch, runTransaction, increment, Timestamp
+  onSnapshot, serverTimestamp, writeBatch, runTransaction, increment, Timestamp, deleteField
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
   minsToHM, dayName, addDays, summarizeDay, TYPE_LABEL, METHOD_LABEL, getPosition, mapLink, applyBrand, logoHtml,
   isExpired, daysLeft, randPin, randSecret, money, copyText, authErr, icon, fileToDataURL
 } from './ui.js';
+import {
+  leaveTypes, leaveTypeName, DEFAULT_LEAVE_TYPES, holidayMap, fixedNationalHolidays, shiftById, shiftLabel, resolveDay,
+  lateSettings, otKind, OT_LABEL, otRates, loadRoster, dateRange, weekStart, leaveBalances, leaveDateMap,
+  REQ_LABEL, STATUS_BADGE, countLeaveDays
+} from './sched.js';
 
 const app = $('#app');
 const S = {
   user: null, me: null, cid: null, company: null, workers: [], locations: [], plans: {},
-  view: 'dashboard', unsubs: [], viewUnsub: null
+  view: 'dashboard', unsubs: [], viewUnsub: null, pending: []
 };
 const cRef = () => doc(db, 'companies', S.cid);
 const sub = (name) => collection(db, 'companies', S.cid, name);
@@ -233,6 +238,12 @@ function startApp() {
     S.workers = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.id.localeCompare(b.id));
     if (S.view === 'workers') renderWorkerList();
   }));
+  S.unsubs.push(onSnapshot(query(sub('requests'), where('status', '==', 'pending')), (s) => {
+    S.pending = s.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }))
+      .sort((a, b) => (toDate(a.createdAt)?.getTime() || 0) - (toDate(b.createdAt)?.getTime() || 0));
+    updatePendingBadge();
+    if (S.view === 'approvals') drawApprovals();
+  }));
   S.unsubs.push(onSnapshot(sub('locations'), (s) => {
     S.locations = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     if (S.view === 'locations') viewLocations();
@@ -242,6 +253,8 @@ function startApp() {
 const NAV = () => [
   ['dashboard', 'home', L('Dashboard', 'Dashboard')],
   ['workers', 'users', L('Pekerja', 'Staff')],
+  ['roster', 'cal', L('Syif & Jadual', 'Shifts & Roster')],
+  ['approvals', 'check', L('Kelulusan', 'Approvals')],
   ['locations', 'pin', L('Lokasi', 'Locations')],
   ['reports', 'chart', L('Laporan', 'Reports')],
   ['news', 'bell', L('Pengumuman', 'Announcements')],
@@ -256,7 +269,7 @@ function renderShell() {
     <aside class="side" id="side">
       <div class="side-brand"><span data-brand-logo>${logoHtml(c)}</span>
         <div><div class="nm" data-brand-name>${esc(c.name)}</div><div class="xs" style="opacity:.7">${esc(c.code)} · Admin</div></div></div>
-      <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span>${t}</span></button>`).join('')}</nav>
+      <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
         <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div>
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 16)} ${L('Keluar', 'Logout')}</button></div>
@@ -277,8 +290,14 @@ function renderShell() {
   $('#sideBg').onclick = closeSide;
   $('#lo').onclick = async () => { if (await confirmBox(L('Log keluar sekarang?', 'Log out now?'))) signOut(auth); };
   updateBrandBits();
+  updatePendingBadge();
   go(S.view);
   checkPaywall();
+}
+function updatePendingBadge() {
+  const b = $('#pendBadge'); if (!b) return;
+  b.textContent = S.pending.length;
+  b.classList.toggle('hide', !S.pending.length);
 }
 function closeSide() { $('#side')?.classList.remove('open'); $('#sideBg')?.classList.remove('open'); }
 function updateBrandBits() {
@@ -296,12 +315,13 @@ function updateBrandBits() {
 
 function go(v) {
   if (S.viewUnsub) { S.viewUnsub(); S.viewUnsub = null; }
+  S.viewToken = null;
   S.view = v;
   $$('.side nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   const t = NAV().find(n => n[0] === v);
   $('#vTitle').textContent = t ? t[2] : '';
   ({ dashboard: viewDashboard, workers: viewWorkers, locations: viewLocations, reports: viewReports,
-     news: viewNews, settings: viewSettings, billing: viewBilling })[v]();
+     news: viewNews, settings: viewSettings, billing: viewBilling, roster: viewRoster, approvals: viewApprovals })[v]();
   window.scrollTo(0, 0);
 }
 
@@ -383,29 +403,44 @@ function viewDashboard() {
       <button class="btn btn-primary btn-sm" data-goto2="workers">${icon('users', 16)} ${L('Tambah Pekerja', 'Add Staff')}</button></div>`;
     $$('[data-goto2]').forEach(b => b.onclick = () => go(b.dataset.goto2));
   }
+  let roster = {}, todayLeave = {};
+  const token = (S.viewToken = {});
+  Promise.all([
+    loadRoster(db, S.cid, t, t).then(r => { roster = r; }).catch(() => {}),
+    getDocs(query(sub('requests'), where('status', '==', 'approved'))).then(s => {
+      s.docs.map(d => d.data()).filter(r => r.kind === 'leave' && r.from <= t && (r.to || r.from) >= t)
+        .forEach(r => { todayLeave[r.workerId] = r; });
+    }).catch(() => {})
+  ]).then(() => {
+  if (S.viewToken !== token) return;
   S.viewUnsub = onSnapshot(query(sub('attendance'), where('date', '==', t)), (snap) => {
     const recs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
     const active = S.workers.filter(w => w.active !== false);
     const byUid = {};
     recs.forEach(r => (byUid[r.uid] = byUid[r.uid] || []).push(r));
-    const st = S.company.settings || {};
     let present = 0, late = 0, onBreak = 0, out = 0;
     const presentIds = new Set();
     Object.values(byUid).forEach(list => {
-      const s = summarizeDay(list, st, t);
+      const w = S.workers.find(x => x.id === list[0].workerId);
+      const s = summarizeDay(list, lateSettings(S.company, resolveDay(S.company, w, t, roster[t]?.[list[0].workerId])), t);
       if (s.firstIn) { present++; presentIds.add(list[0].workerId); }
       if (s.lateMin) late++;
       if (s.onBreak) onBreak++;
       if (s.lastType === 'out') out++;
     });
-    const absent = active.filter(w => !presentIds.has(w.id));
+    const onLeave = active.filter(w => todayLeave[w.id] && !presentIds.has(w.id));
+    const absent = active.filter(w => !presentIds.has(w.id) && !todayLeave[w.id]
+      && resolveDay(S.company, w, t, roster[t]?.[w.id]).type === 'work');
     $('#dStats').innerHTML = `
       <div class="stat"><div class="n">${active.length}</div><div class="t">${L('Pekerja aktif', 'Active staff')}</div></div>
       <div class="stat ok"><div class="n">${present}</div><div class="t">${L('Hadir', 'Present')}</div></div>
       <div class="stat warn"><div class="n">${late}</div><div class="t">${L('Lewat', 'Late')}</div></div>
       <div class="stat bad"><div class="n">${absent.length}</div><div class="t">${L('Belum hadir', 'Not in')}</div></div>
       <div class="stat info"><div class="n">${onBreak}</div><div class="t">${L('Sedang rehat', 'On break')}</div></div>
-      <div class="stat"><div class="n">${out}</div><div class="t">${L('Sudah keluar', 'Clocked out')}</div></div>`;
+      <div class="stat"><div class="n">${out}</div><div class="t">${L('Sudah keluar', 'Clocked out')}</div></div>
+      <div class="stat info"><div class="n">${onLeave.length}</div><div class="t">${L('Bercuti', 'On leave')}</div></div>
+      <div class="stat warn" style="cursor:pointer" data-goto3="approvals"><div class="n">${S.pending.length}</div><div class="t">${L('Menunggu kelulusan', 'Pending approval')}</div></div>`;
+    $$('[data-goto3]').forEach(b => b.onclick = () => go('approvals'));
     if (S.workers.length || recs.length) {
       const sorted = recs.sort((a, b) => (toDate(b.ts)?.getTime() || 0) - (toDate(a.ts)?.getTime() || 0)).slice(0, 60);
       $('#dAct').innerHTML = sorted.length ? `<div class="table-wrap"><table>
@@ -425,8 +460,9 @@ function viewDashboard() {
     }
     $('#dAbs').innerHTML = absent.length ? `<ul class="timeline">${absent.map(w =>
       `<li><span class="dot d-out"></span><span class="grow">${esc(w.name)}</span><span class="xs muted mono">${esc(w.id)}</span></li>`).join('')}</ul>`
-      : `<div class="empty small">${active.length ? L('Semua pekerja sudah hadir 🎉', 'Everyone is in 🎉') : L('Tiada pekerja aktif.', 'No active staff.')}</div>`;
+      : `<div class="empty small">${active.length ? L('Semua pekerja yang bertugas sudah hadir 🎉', 'Everyone on duty is in 🎉') : L('Tiada pekerja aktif.', 'No active staff.')}</div>`;
   }, err => toast(authErr(err), 'bad'));
+  });
 }
 
 // ================================================================ PEKERJA
@@ -463,6 +499,7 @@ function renderWorkerList() {
       <td>${w.active === false ? `<span class="badge b-bad">${L('Tidak aktif', 'Inactive')}</span>` : `<span class="badge b-ok">${L('Aktif', 'Active')}</span>`}
         ${w.mustChangePin ? `<div class="xs muted">${L('Belum log masuk', 'Not logged in yet')}</div>` : ''}</td>
       <td class="right" style="white-space:nowrap">
+        ${w.phone ? `<a class="btn btn-sm btn-ghost" title="WhatsApp" target="_blank" rel="noopener" href="https://wa.me/${String(w.phone).replace(/\D/g, '').replace(/^0/, '60')}">${icon('chat', 16)}</a>` : ''}
         <button class="btn btn-sm btn-ghost" data-ed="${esc(w.id)}">${L('Sunting', 'Edit')}</button>
         <button class="btn btn-sm btn-ghost" data-more="${esc(w.id)}">⋯</button>
       </td></tr>`).join('')}</tbody></table></div>
@@ -536,6 +573,23 @@ function workerForm(w) {
         <div class="field"><label class="lbl">${L('No. PERKESO', 'SOCSO no.')}</label><input class="input" name="socsoNo" value="${esc(w.socsoNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. cukai (LHDN)', 'Tax no. (LHDN)')}</label><input class="input" name="taxNo" value="${esc(w.taxNo || '')}"></div>
       </div>
+      <div class="sec-title">${L('Syif & Hari Bekerja', 'Shift & Work Days')}</div>
+      <div class="grid2">
+        <div class="field"><label class="lbl">${L('Syif biasa', 'Default shift')}</label>
+          <select class="input" name="defaultShift"><option value="">${L('Ikut waktu kerja syarikat', 'Company work hours')} (${esc((c.settings || {}).workStart || '09:00')}–${esc((c.settings || {}).workEnd || '18:00')})</option>
+          ${(c.shiftTemplates || []).map(sh => `<option value="${esc(sh.id)}" ${sh.id === w.defaultShift ? 'selected' : ''}>${esc(shiftLabel(sh))}</option>`).join('')}</select></div>
+        <div class="field"><label class="lbl">${L('Hari bekerja', 'Work days')}</label>
+          <label class="check" style="margin-bottom:.4rem"><input type="checkbox" id="wdOwn" ${Array.isArray(w.workDays) && w.workDays.length ? 'checked' : ''}>${L('Tetapkan khas untuk pekerja ini', 'Set specifically for this staff')}</label>
+          <div class="row" id="wdBox">${[1, 2, 3, 4, 5, 6, 0].map(d => `<label class="check"><input type="checkbox" data-wwd="${d}" ${(Array.isArray(w.workDays) && w.workDays.length ? w.workDays : ((c.settings || {}).workDays || [1, 2, 3, 4, 5])).includes(d) ? 'checked' : ''}>${dayName(d)}</label>`).join('')}</div></div>
+      </div>
+      <div class="sec-title">${L('Kelayakan Cuti (setahun)', 'Leave Entitlement (per year)')}</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>${L('Jenis cuti', 'Leave type')}</th><th>${L('Kelayakan (hari)', 'Entitlement (days)')}</th><th>${L('Bawa ke hadapan', 'Carried forward')}</th></tr></thead>
+        <tbody>${leaveTypes(c).map(lt => `<tr><td>${esc(lt.name)}</td>
+          <td><input class="input" type="number" min="0" step="0.5" data-ent="${esc(lt.id)}" value="${w.leaveEntitle?.[lt.id] ?? ''}" placeholder="${lt.days ?? 0}" style="max-width:110px"></td>
+          <td><input class="input" type="number" min="0" step="0.5" data-carry="${esc(lt.id)}" value="${w.leaveCarry?.[lt.id] ?? ''}" placeholder="0" style="max-width:110px"></td></tr>`).join('')}</tbody>
+      </table></div>
+      <p class="xs muted">${L('Kosongkan untuk guna nilai lalai syarikat.', 'Leave blank to use the company default.')}</p>
       <div class="sec-title">${L('Elaun', 'Allowances')}</div>
       <div id="allowBox">${(w.allowances || []).map(allowRow).join('')}</div>
       <div class="row">
@@ -556,6 +610,8 @@ function workerForm(w) {
   bindDyn(el);
   $('#addAllow', el).onclick = () => $('#allowBox', el).insertAdjacentHTML('beforeend', allowRow());
   $('#addDed', el).onclick = () => $('#dedBox', el).insertAdjacentHTML('beforeend', dedRow());
+  const syncWd = () => $$('[data-wwd]', el).forEach(x => x.disabled = !$('#wdOwn', el).checked);
+  $('#wdOwn', el).onchange = syncWd; syncWd();
   const ts = $('#tplSel', el);
   if (ts) ts.onchange = () => { if (ts.value !== '') { $('#allowBox', el).insertAdjacentHTML('beforeend', allowRow(tpls[Number(ts.value)])); ts.value = ''; } };
 }
@@ -569,7 +625,11 @@ async function saveWorker(el, w) {
     position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, startDate: fd.startDate || '',
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
-    allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp()
+    allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp(),
+    defaultShift: fd.defaultShift || '',
+    workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],
+    leaveEntitle: Object.fromEntries($$('[data-ent]', el).filter(x => x.value !== '').map(x => [x.dataset.ent, Number(x.value)])),
+    leaveCarry: Object.fromEntries($$('[data-carry]', el).filter(x => x.value !== '').map(x => [x.dataset.carry, Number(x.value)]))
   };
   try {
     if (w) {
@@ -808,36 +868,50 @@ async function genReport() {
   const out = $('#rOut');
   out.innerHTML = `<div class="loader" style="min-height:150px"><span class="spin"></span></div>`;
   try {
-    const s = await getDocs(query(sub('attendance'), where('date', '>=', from), where('date', '<=', to)));
+    const [s, roster, rq] = await Promise.all([
+      getDocs(query(sub('attendance'), where('date', '>=', from), where('date', '<=', to))),
+      loadRoster(db, S.cid, from, to).catch(() => ({})),
+      getDocs(query(sub('requests'), where('status', '==', 'approved'))).catch(() => null)
+    ]);
     let recs = s.docs.map(d => ({ id: d.id, ...d.data() }));
     if (wid) recs = recs.filter(r => r.workerId === wid);
-    const st = S.company.settings || {};
+    const approved = rq ? rq.docs.map(d => d.data()) : [];
     const workers = S.workers.filter(w => wid ? w.id === wid : true);
+    const wById = Object.fromEntries(S.workers.map(w => [w.id, w]));
+    const info = (w, d) => resolveDay(S.company, w, d, roster[d]?.[w?.id]);
     // Harian
     const key = {};
     recs.forEach(r => { const k = r.workerId + '|' + r.date; (key[k] = key[k] || []).push(r); });
     const daily = Object.entries(key).map(([k, list]) => {
       const [workerId, date] = k.split('|');
-      const sm = summarizeDay(list, st, date);
+      const sm = summarizeDay(list, lateSettings(S.company, info(wById[workerId], date)), date);
       return { workerId, name: list[0].name, date, ...sm };
     }).sort((a, b) => a.date.localeCompare(b.date) || a.workerId.localeCompare(b.workerId));
-    // Hari bekerja dalam julat (sehingga hari ini)
-    const wd = st.workDays || [1, 2, 3, 4, 5];
     const end = to > todayStr() ? todayStr() : to;
-    const workDates = [];
-    for (let d = from; d <= end; d = addDays(d, 1)) if (wd.includes(new Date(d + 'T00:00:00').getDay())) workDates.push(d);
+    const dates = from <= end ? dateRange(from, end) : [];
     // Ringkasan
     const summary = workers.map(w => {
       const rows = daily.filter(r => r.workerId === w.id);
+      const presentDates = new Set(rows.filter(r => r.firstIn).map(r => r.date));
+      const lv = leaveDateMap(approved.filter(r => r.workerId === w.id));
       const start = w.startDate || '0000-00-00';
-      const due = workDates.filter(d => d >= start).length;
-      const present = rows.filter(r => r.firstIn).length;
+      let absent = 0, leave = 0;
+      dates.forEach(d => {
+        if (d < start) return;
+        const di = info(w, d);
+        if (lv[d] && di.type === 'work') { leave += (lv[d].half && lv[d].from === lv[d].to) ? 0.5 : 1; return; }
+        if (di.type === 'work' && !presentDates.has(d)) absent++;
+      });
+      const ot = { normal: 0, rest: 0, holiday: 0 };
+      approved.filter(r => r.kind === 'ot' && r.workerId === w.id && r.date >= from && r.date <= to).forEach(r => {
+        ot[otKind(info(w, r.date))] += Number(r.approvedHours ?? r.hours ?? 0);
+      });
       return {
-        id: w.id, name: w.name, dept: w.dept || '', present,
+        id: w.id, name: w.name, dept: w.dept || '', present: presentDates.size, leave, absent,
         lateDays: rows.filter(r => r.lateMin > 0).length,
         lateMin: rows.reduce((a, r) => a + r.lateMin, 0),
         workMin: rows.reduce((a, r) => a + r.workMin, 0),
-        absent: Math.max(0, due - rows.filter(r => workDates.includes(r.date)).length)
+        ot
       };
     });
     REPORT = { from, to, daily, summary };
@@ -848,12 +922,13 @@ async function genReport() {
       <div class="tabs no-print"><button class="on" data-rt="sum">${L('Ringkasan', 'Summary')}</button><button data-rt="day">${L('Harian', 'Daily')}</button></div>
       <div id="rtSum">
         <div class="table-wrap"><table>
-          <thead><tr><th>ID</th><th>${L('Nama', 'Name')}</th><th>${L('Hadir', 'Present')}</th><th>${L('Tidak hadir', 'Absent')}</th><th>${L('Hari lewat', 'Late days')}</th><th>${L('Minit lewat', 'Late mins')}</th><th>${L('Jam kerja', 'Hours')}</th></tr></thead>
-          <tbody>${summary.map(r => `<tr><td class="mono">${esc(r.id)}</td><td>${esc(r.name)}</td><td>${r.present}</td>
+          <thead><tr><th>ID</th><th>${L('Nama', 'Name')}</th><th>${L('Hadir', 'Present')}</th><th>${L('Cuti', 'Leave')}</th><th>${L('Tidak hadir', 'Absent')}</th><th>${L('Hari lewat', 'Late days')}</th><th>${L('Minit lewat', 'Late mins')}</th><th>${L('Jam kerja', 'Hours')}</th>
+            <th>OT ${L('biasa', 'normal')}</th><th>OT ${L('rehat', 'rest')}</th><th>OT ${L('C.umum', 'holiday')}</th></tr></thead>
+          <tbody>${summary.map(r => `<tr><td class="mono">${esc(r.id)}</td><td>${esc(r.name)}</td><td>${r.present}</td><td>${r.leave || 0}</td>
             <td>${r.absent ? `<span class="badge b-bad">${r.absent}</span>` : 0}</td><td>${r.lateDays ? `<span class="badge b-warn">${r.lateDays}</span>` : 0}</td>
-            <td>${r.lateMin}</td><td>${minsToHM(r.workMin)}</td></tr>`).join('') || `<tr><td colspan="7" class="center muted">${L('Tiada data', 'No data')}</td></tr>`}</tbody>
+            <td>${r.lateMin}</td><td>${minsToHM(r.workMin)}</td><td>${r.ot.normal}j</td><td>${r.ot.rest}j</td><td>${r.ot.holiday}j</td></tr>`).join('') || `<tr><td colspan="11" class="center muted">${L('Tiada data', 'No data')}</td></tr>`}</tbody>
         </table></div>
-        <p class="xs muted" style="margin-top:.5rem">${L('Tidak hadir dikira berdasarkan hari bekerja dalam Tetapan (belum termasuk cuti).', 'Absences are based on work days in Settings (leave not yet included).')}</p>
+        <p class="xs muted" style="margin-top:.5rem">${L('Tidak hadir = hari bekerja (ikut syif/jadual) tanpa punch dan tanpa cuti diluluskan. Cuti umum & hari rehat tidak dikira. OT = jam OT yang diluluskan.', 'Absent = work days (by shift/roster) with no punch and no approved leave. Holidays & rest days excluded. OT = approved OT hours.')}</p>
       </div>
       <div id="rtDay" class="hide">
         <div class="table-wrap"><table>
@@ -879,12 +954,13 @@ function exportExcel() {
   const wb = XLSX.utils.book_new();
   const head = [[S.company.name], [`${L('Laporan Kehadiran', 'Attendance Report')}: ${REPORT.from} – ${REPORT.to}`], []];
   const s1 = XLSX.utils.aoa_to_sheet([...head,
-    ['ID', L('Nama', 'Name'), L('Jabatan', 'Department'), L('Hadir', 'Present'), L('Tidak hadir', 'Absent'), L('Hari lewat', 'Late days'), L('Minit lewat', 'Late mins'), L('Jam kerja', 'Hours')],
-    ...REPORT.summary.map(r => [r.id, r.name, r.dept, r.present, r.absent, r.lateDays, r.lateMin, +(r.workMin / 60).toFixed(2)])]);
+    ['ID', L('Nama', 'Name'), L('Jabatan', 'Department'), L('Hadir', 'Present'), L('Cuti', 'Leave'), L('Tidak hadir', 'Absent'), L('Hari lewat', 'Late days'), L('Minit lewat', 'Late mins'), L('Jam kerja', 'Hours'),
+      L('OT hari biasa (jam)', 'OT normal (hrs)'), L('OT hari rehat (jam)', 'OT rest (hrs)'), L('OT cuti umum (jam)', 'OT holiday (hrs)')],
+    ...REPORT.summary.map(r => [r.id, r.name, r.dept, r.present, r.leave, r.absent, r.lateDays, r.lateMin, +(r.workMin / 60).toFixed(2), r.ot.normal, r.ot.rest, r.ot.holiday])]);
   const s2 = XLSX.utils.aoa_to_sheet([...head,
     [L('Tarikh', 'Date'), 'ID', L('Nama', 'Name'), L('Masuk', 'In'), L('Keluar', 'Out'), L('Rehat (min)', 'Break (min)'), L('Jam kerja', 'Hours'), L('Lewat (min)', 'Late (min)'), L('Lokasi', 'Location')],
     ...REPORT.daily.map(r => [r.date, r.workerId, r.name, fmtTime(r.firstIn), r.open ? '' : fmtTime(r.lastOut), Math.round(r.breakMin), +(r.workMin / 60).toFixed(2), r.lateMin, r.locName])]);
-  s1['!cols'] = [{ wch: 10 }, { wch: 28 }, { wch: 16 }, { wch: 8 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 10 }];
+  s1['!cols'] = [{ wch: 10 }, { wch: 28 }, { wch: 16 }, { wch: 8 }, { wch: 8 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
   s2['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 8 }, { wch: 8 }, { wch: 11 }, { wch: 10 }, { wch: 10 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, s1, L('Ringkasan', 'Summary'));
   XLSX.utils.book_append_sheet(wb, s2, L('Harian', 'Daily'));
@@ -980,6 +1056,38 @@ function viewSettings() {
   </div>
 
   <div class="card">
+    <h3>${L('Jenis Cuti', 'Leave Types')}</h3>
+    <p class="small muted">${L('Kelayakan lalai setahun. Boleh diubah untuk setiap pekerja.', 'Default yearly entitlement. Can be changed per staff.')}</p>
+    <div id="ltBox">${leaveTypes(c).map(ltRow).join('')}</div>
+    <div class="row"><button class="btn btn-sm btn-plus" id="ltAdd">${icon('plus', 16)} ${L('Tambah Jenis Cuti', 'Add Leave Type')}</button>
+      <button class="btn btn-primary btn-sm" id="ltSave">${L('Simpan', 'Save')}</button></div>
+  </div>
+
+  <div class="card">
+    <h3>${L('Cuti Umum', 'Public Holidays')}</h3>
+    <p class="small muted">${L('Hari cuti umum tidak dikira tidak hadir, dan OT pada hari ini guna kadar cuti umum.', 'Holidays are not counted as absent, and OT on these days uses the holiday rate.')}</p>
+    <div id="holBox">${[...(c.holidays || [])].sort((a, b) => a.date.localeCompare(b.date)).map(holRow).join('')}</div>
+    <div class="row">
+      <button class="btn btn-sm btn-plus" id="holAdd">${icon('plus', 16)} ${L('Tambah Cuti Umum', 'Add Holiday')}</button>
+      <button class="btn btn-sm btn-soft" id="holFixed">${L('+ Cuti tetap kebangsaan', '+ Fixed national holidays')} ${new Date().getFullYear()}</button>
+      <button class="btn btn-sm btn-soft" id="holCopy">${L('Salin dari tahun lepas', 'Copy from last year')}</button>
+      <button class="btn btn-primary btn-sm" id="holSave">${L('Simpan', 'Save')}</button>
+    </div>
+    <p class="xs muted" style="margin-top:.5rem">${L('Cuti agama (Hari Raya, CNY, Deepavali dll.) berubah setiap tahun — sila tambah sendiri ikut kalendar rasmi negeri anda.', 'Religious holidays (Hari Raya, CNY, Deepavali etc.) change yearly — add them from your state\'s official calendar.')}</p>
+  </div>
+
+  <div class="card">
+    <h3>${L('Kadar OT', 'Overtime Rates')}</h3>
+    <p class="small muted">${L('Gandaan kadar sejam. Isi ikut polisi syarikat anda.', 'Multiplier of the hourly rate. Set according to your company policy.')}</p>
+    <div class="grid3">
+      <div class="field"><label class="lbl">${L('Hari biasa', 'Normal day')}</label><input class="input" type="number" step="0.1" min="0" id="otN" value="${otRates(c).normal}"></div>
+      <div class="field"><label class="lbl">${L('Hari rehat', 'Rest day')}</label><input class="input" type="number" step="0.1" min="0" id="otR" value="${otRates(c).rest}"></div>
+      <div class="field"><label class="lbl">${L('Cuti umum', 'Public holiday')}</label><input class="input" type="number" step="0.1" min="0" id="otH" value="${otRates(c).holiday}"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" id="otSave">${L('Simpan', 'Save')}</button>
+  </div>
+
+  <div class="card">
     <h3>${L('Akaun', 'Account')}</h3>
     <div class="set-row"><span class="muted">${L('E-mel', 'Email')}</span><b>${esc(S.user.email || '')}</b></div>
     <div class="set-row"><span class="muted">${L('Bahasa', 'Language')}</span>${langBtn().replace('lang-btn', 'btn btn-sm btn-ghost')}</div>
@@ -1047,6 +1155,64 @@ function viewSettings() {
     finally { busy(e.currentTarget, false); }
   };
   $('#cpLink').onclick = () => copyText(location.origin);
+
+  // Jenis cuti
+  const ltBox = $('#ltBox'); bindDyn(ltBox);
+  $('#ltAdd').onclick = () => ltBox.insertAdjacentHTML('beforeend', ltRow({}));
+  $('#ltSave').onclick = async (e) => {
+    const rows = $$('[data-row="lt"]', ltBox).map(r => ({
+      id: r.dataset.id || ('t' + Math.random().toString(36).slice(2, 8)),
+      name: $('[data-k="name"]', r).value.trim(), days: Number($('[data-k="days"]', r).value || 0), paid: $('[data-k="paid"]', r).checked
+    })).filter(x => x.name);
+    busy(e.currentTarget, true);
+    try { await updateDoc(cRef(), { leaveTypes: rows }); toast(L('Jenis cuti disimpan.', 'Leave types saved.')); viewSettings(); }
+    catch (err) { toast(authErr(err), 'bad'); busy(e.currentTarget, false); }
+  };
+  // Cuti umum
+  const holBox = $('#holBox'); bindDyn(holBox);
+  const readHol = () => $$('[data-row="hol"]', holBox).map(r => ({ date: $('[data-k="date"]', r).value, name: $('[data-k="name"]', r).value.trim() })).filter(h => h.date);
+  const drawHol = (list) => { holBox.innerHTML = list.sort((a, b) => a.date.localeCompare(b.date)).map(holRow).join(''); };
+  const mergeHol = (add) => { const m = {}; [...readHol(), ...add].forEach(h => { m[h.date] = h; }); drawHol(Object.values(m)); };
+  $('#holAdd').onclick = () => holBox.insertAdjacentHTML('beforeend', holRow({}));
+  $('#holFixed').onclick = () => { mergeHol(fixedNationalHolidays(new Date().getFullYear())); toast(L('Ditambah. Tekan Simpan.', 'Added. Press Save.'), 'warn'); };
+  $('#holCopy').onclick = () => {
+    const y = new Date().getFullYear();
+    const prev = readHol().filter(h => h.date.startsWith(String(y - 1))).map(h => ({ date: (y) + h.date.slice(4), name: h.name }));
+    if (!prev.length) return toast(L(`Tiada cuti umum ${y - 1} untuk disalin.`, `No ${y - 1} holidays to copy.`), 'warn');
+    mergeHol(prev);
+    toast(L('Disalin. Semak tarikh cuti agama, kemudian tekan Simpan.', 'Copied. Check religious holiday dates, then press Save.'), 'warn', 5000);
+  };
+  $('#holSave').onclick = async (e) => {
+    busy(e.currentTarget, true);
+    try { await updateDoc(cRef(), { holidays: readHol() }); toast(L('Cuti umum disimpan.', 'Holidays saved.')); }
+    catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  // Kadar OT
+  $('#otSave').onclick = async (e) => {
+    busy(e.currentTarget, true);
+    try {
+      await updateDoc(cRef(), { otRates: { normal: Number($('#otN').value || 0), rest: Number($('#otR').value || 0), holiday: Number($('#otH').value || 0) } });
+      toast(L('Kadar OT disimpan.', 'OT rates saved.'));
+    } catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+}
+
+function ltRow(t = {}) {
+  return `<div class="dyn-row ded" data-row="lt" data-id="${esc(t.id || '')}">
+    <input class="input" data-k="name" placeholder="${L('Nama cuti', 'Leave name')}" value="${esc(t.name || '')}">
+    <input class="input" data-k="days" type="number" min="0" step="0.5" placeholder="${L('Hari', 'Days')}" value="${t.days ?? ''}">
+    <label class="check"><input type="checkbox" data-k="paid" ${t.paid !== false ? 'checked' : ''}>${L('Bergaji', 'Paid')}</label>
+    <button type="button" class="icon-btn" data-del>✕</button>
+  </div>`;
+}
+function holRow(h = {}) {
+  return `<div class="dyn-row ded" data-row="hol" style="grid-template-columns:1fr 2fr auto">
+    <input class="input" data-k="date" type="date" value="${esc(h.date || '')}">
+    <input class="input" data-k="name" placeholder="${L('Nama cuti umum', 'Holiday name')}" value="${esc(h.name || '')}">
+    <button type="button" class="icon-btn" data-del>✕</button>
+  </div>`;
 }
 
 // ================================================================ LANGGANAN
@@ -1081,4 +1247,257 @@ async function viewBilling() {
 }
 function planName(p) {
   return ({ monthly: L('Bulanan', 'Monthly'), sixMonth: L('6 Bulan', '6 Months'), yearly: L('Tahunan', 'Yearly'), trial: L('Percubaan', 'Trial'), manual: L('Manual', 'Manual') })[p] || (p || '-');
+}
+
+// ================================================================ SYIF & JADUAL
+function viewRoster() {
+  S.rosterTab = S.rosterTab || 'week';
+  $('#view').innerHTML = `
+    <div class="tabs">
+      <button data-rtab="week">${L('Jadual Mingguan', 'Weekly Roster')}</button>
+      <button data-rtab="tpl">${L('Templat Syif', 'Shift Templates')}</button>
+    </div>
+    <div id="rosterBody"></div>`;
+  $$('[data-rtab]').forEach(b => {
+    b.classList.toggle('on', b.dataset.rtab === S.rosterTab);
+    b.onclick = () => { S.rosterTab = b.dataset.rtab; viewRoster(); };
+  });
+  S.rosterTab === 'tpl' ? drawShiftTpl() : drawWeek();
+}
+
+function shiftRow(sh = {}) {
+  return `<div class="dyn-row" data-row="shift" data-id="${esc(sh.id || '')}" style="grid-template-columns:2fr 1fr 1fr 1fr auto">
+    <input class="input" data-k="name" placeholder="${L('Nama syif (cth: Pagi)', 'Shift name (e.g. Morning)')}" value="${esc(sh.name || '')}">
+    <input class="input" data-k="start" type="time" value="${esc(sh.start || '08:00')}" title="${L('Masuk', 'Start')}">
+    <input class="input" data-k="end" type="time" value="${esc(sh.end || '17:00')}" title="${L('Keluar', 'End')}">
+    <input class="input" data-k="grace" type="number" min="0" max="120" value="${sh.grace ?? (S.company.settings?.grace ?? 10)}" title="${L('Tenggang lewat (minit)', 'Late grace (min)')}">
+    <button type="button" class="icon-btn" data-del>✕</button>
+  </div>`;
+}
+
+function drawShiftTpl() {
+  const box = $('#rosterBody');
+  box.innerHTML = `
+  <div class="card">
+    <h3>${L('Templat Syif', 'Shift Templates')}</h3>
+    <p class="small muted">${L('Contoh: Pagi 07:00–15:00, Petang 15:00–23:00, Malam 23:00–07:00. Lajur: nama · masuk · keluar · tenggang lewat (minit).', 'E.g. Morning 07:00–15:00, Evening 15:00–23:00, Night 23:00–07:00. Columns: name · start · end · late grace (min).')}</p>
+    <div id="shBox">${(S.company.shiftTemplates || []).map(shiftRow).join('')}</div>
+    <div class="row">
+      <button class="btn btn-sm btn-plus" id="shAdd">${icon('plus', 16)} ${L('Tambah Syif', 'Add Shift')}</button>
+      <button class="btn btn-primary btn-sm" id="shSave">${L('Simpan Templat', 'Save Templates')}</button>
+    </div>
+  </div>`;
+  const shBox = $('#shBox'); bindDyn(shBox);
+  $('#shAdd').onclick = () => shBox.insertAdjacentHTML('beforeend', shiftRow());
+  $('#shSave').onclick = async (e) => {
+    const rows = $$('[data-row="shift"]', shBox).map(r => ({
+      id: r.dataset.id || ('s' + Math.random().toString(36).slice(2, 8)),
+      name: $('[data-k="name"]', r).value.trim(), start: $('[data-k="start"]', r).value, end: $('[data-k="end"]', r).value,
+      grace: Number($('[data-k="grace"]', r).value || 0)
+    })).filter(x => x.name && x.start && x.end);
+    busy(e.currentTarget, true);
+    try { await updateDoc(cRef(), { shiftTemplates: rows }); toast(L('Templat syif disimpan.', 'Shift templates saved.')); }
+    catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+}
+
+async function drawWeek() {
+  const box = $('#rosterBody');
+  S.weekFrom = S.weekFrom || weekStart();
+  const from = S.weekFrom, to = addDays(from, 6), days = dateRange(from, to);
+  const hol = holidayMap(S.company);
+  const tpls = S.company.shiftTemplates || [];
+  const workers = S.workers.filter(w => w.active !== false);
+  box.innerHTML = `
+  <div class="card">
+    <div class="card-head">
+      <div class="row">
+        <button class="btn btn-sm btn-ghost" id="wkPrev">${icon('left', 16)}</button>
+        <b>${fmtDate(from, { day: 'numeric', month: 'short' })} – ${fmtDate(to)}</b>
+        <button class="btn btn-sm btn-ghost" id="wkNext">${icon('right', 16)}</button>
+        <button class="btn btn-sm btn-ghost" id="wkToday">${L('Minggu ini', 'This week')}</button>
+      </div>
+      <div class="row">
+        <button class="btn btn-sm btn-soft" id="wkCopy">${L('Salin minggu lepas', 'Copy last week')}</button>
+        <button class="btn btn-sm btn-ghost" id="wkClear">${L('Kosongkan', 'Clear')}</button>
+      </div>
+    </div>
+    ${!tpls.length ? `<p class="small" style="color:var(--warn)">${L('Belum ada templat syif. Tambah di tab "Templat Syif" dahulu — atau guna waktu kerja biasa.', 'No shift templates yet. Add them in "Shift Templates" first — or use normal hours.')}</p>` : ''}
+    <div id="wkGrid"><div class="loader" style="min-height:120px"><span class="spin"></span></div></div>
+    <p class="xs muted" style="margin-top:.6rem">${L('"Ikut biasa" = syif biasa pekerja / waktu kerja syarikat. Perubahan disimpan serta-merta.', '"Default" = staff default shift / company hours. Changes save instantly.')}</p>
+  </div>`;
+  $('#wkPrev').onclick = () => { S.weekFrom = addDays(from, -7); drawWeek(); };
+  $('#wkNext').onclick = () => { S.weekFrom = addDays(from, 7); drawWeek(); };
+  $('#wkToday').onclick = () => { S.weekFrom = weekStart(); drawWeek(); };
+  const [roster, rq] = await Promise.all([
+    loadRoster(db, S.cid, from, to).catch(() => ({})),
+    getDocs(query(sub('requests'), where('status', '==', 'approved'))).catch(() => null)
+  ]);
+  const lv = {};
+  (rq ? rq.docs.map(d => d.data()) : []).filter(r => r.kind === 'leave' && r.from <= to && (r.to || r.from) >= from)
+    .forEach(r => dateRange(r.from, r.to || r.from).forEach(d => { (lv[r.workerId] = lv[r.workerId] || {})[d] = r; }));
+  if (!workers.length) { $('#wkGrid').innerHTML = `<div class="empty">${L('Tiada pekerja aktif.', 'No active staff.')}</div>`; return; }
+  const defLabel = (w, d) => {
+    const di = resolveDay(S.company, w, d, undefined);
+    return di.type === 'off' ? L('Rehat', 'Rest') : di.type === 'holiday' ? L('C. umum', 'Holiday') : (di.shift?.name || '');
+  };
+  $('#wkGrid').innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>${L('Pekerja', 'Staff')}</th>${days.map(d => {
+      const dt = new Date(d + 'T00:00:00');
+      return `<th class="center">${dayName(dt.getDay())}<div style="font-weight:600;text-transform:none">${dt.getDate()}/${dt.getMonth() + 1}</div>${hol[d] ? `<div class="badge b-info" style="text-transform:none">${esc(hol[d])}</div>` : ''}</th>`;
+    }).join('')}</tr></thead>
+    <tbody>${workers.map(w => `<tr><td style="white-space:nowrap"><b>${esc(w.name)}</b><div class="xs muted mono">${esc(w.id)}</div></td>
+      ${days.map(d => {
+        const val = roster[d]?.[w.id] || '';
+        const leave = lv[w.id]?.[d];
+        return `<td style="min-width:118px">
+          <select class="input" data-cell="${esc(w.id)}|${d}" style="padding:.35rem .4rem;font-size:.8rem;${val === 'off' ? 'background:#f1f5f9' : val ? 'background:var(--brand-soft)' : ''}">
+            <option value="">${L('Ikut biasa', 'Default')} (${esc(defLabel(w, d))})</option>
+            ${tpls.map(t => `<option value="${esc(t.id)}" ${val === t.id ? 'selected' : ''}>${esc(t.name)} ${esc(t.start)}</option>`).join('')}
+            <option value="off" ${val === 'off' ? 'selected' : ''}>${L('Rehat', 'Rest')}</option>
+          </select>
+          ${leave ? `<div class="badge b-info" style="margin-top:2px">${L('Cuti', 'Leave')}</div>` : ''}
+        </td>`;
+      }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  $$('[data-cell]').forEach(sel => sel.onchange = async () => {
+    const [w, d] = sel.dataset.cell.split('|');
+    const v = sel.value;
+    sel.style.background = v === 'off' ? '#f1f5f9' : v ? 'var(--brand-soft)' : '';
+    try { await setDoc(doc(db, 'companies', S.cid, 'roster', d), { a: { [w]: v || deleteField() } }, { merge: true }); }
+    catch (e) { toast(authErr(e), 'bad'); }
+  });
+  $('#wkCopy').onclick = async (e) => {
+    if (!await confirmBox(L('Salin jadual minggu lepas ke minggu ini? Jadual sedia ada akan ditulis ganti.', "Copy last week's roster to this week? Existing entries will be overwritten."))) return;
+    busy(e.currentTarget, true);
+    try {
+      const prev = await loadRoster(db, S.cid, addDays(from, -7), addDays(from, -1));
+      const b = writeBatch(db);
+      days.forEach((d, i) => {
+        const src = prev[addDays(from, i - 7)] || {};
+        b.set(doc(db, 'companies', S.cid, 'roster', d), { a: src });
+      });
+      await b.commit();
+      toast(L('Jadual disalin.', 'Roster copied.'));
+      drawWeek();
+    } catch (err) { toast(authErr(err), 'bad'); busy(e.currentTarget, false); }
+  };
+  $('#wkClear').onclick = async () => {
+    if (!await confirmBox(L('Kosongkan semua jadual minggu ini? Semua pekerja akan ikut syif biasa.', "Clear this week's roster? Everyone goes back to their default shift."))) return;
+    const b = writeBatch(db);
+    days.forEach(d => b.delete(doc(db, 'companies', S.cid, 'roster', d)));
+    await b.commit();
+    drawWeek();
+  };
+}
+
+// ================================================================ KELULUSAN
+function viewApprovals() {
+  S.apTab = S.apTab || 'pending';
+  $('#view').innerHTML = `
+    <div class="tabs">
+      <button data-atab="pending">${L('Menunggu', 'Pending')} <span class="badge b-warn" id="apCount">${S.pending.length}</span></button>
+      <button data-atab="history">${L('Sejarah', 'History')}</button>
+    </div>
+    <div id="apBody"></div>`;
+  $$('[data-atab]').forEach(b => {
+    b.classList.toggle('on', b.dataset.atab === S.apTab);
+    b.onclick = () => { S.apTab = b.dataset.atab; viewApprovals(); };
+  });
+  S.apApproved = null;
+  drawApprovals();
+}
+
+async function drawApprovals() {
+  const box = $('#apBody'); if (!box) return;
+  const cnt = $('#apCount'); if (cnt) cnt.textContent = S.pending.length;
+  // cuti diluluskan (untuk kira baki)
+  if (!S.apApproved) {
+    try {
+      const s = await getDocs(query(sub('requests'), where('status', '==', 'approved')));
+      S.apApproved = s.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch { S.apApproved = []; }
+  }
+  let list;
+  if (S.apTab === 'pending') list = S.pending;
+  else {
+    box.innerHTML = `<div class="loader" style="min-height:120px"><span class="spin"></span></div>`;
+    try {
+      const s = await getDocs(query(sub('requests'), orderBy('createdAt', 'desc'), limit(150)));
+      list = s.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.status !== 'pending');
+    } catch (e) { box.innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; return; }
+  }
+  if (!list.length) {
+    box.innerHTML = `<div class="card"><div class="empty">${S.apTab === 'pending' ? L('Tiada permohonan menunggu 🎉', 'No pending requests 🎉') : L('Tiada sejarah.', 'No history.')}</div></div>`;
+    return;
+  }
+  box.innerHTML = list.map(r => {
+    const w = S.workers.find(x => x.id === r.workerId);
+    let detail = '', extra = '';
+    if (r.kind === 'leave') {
+      detail = `<b>${esc(r.typeName || leaveTypeName(S.company, r.typeId))}</b> · ${fmtDate(r.from)}${r.to && r.to !== r.from ? ' – ' + fmtDate(r.to) : ''} · <b>${r.days}</b> ${L('hari', 'day(s)')}${r.half ? ` (${r.half === 'am' ? L('pagi', 'AM') : L('petang', 'PM')})` : ''}`;
+      if (w && r.status === 'pending') {
+        const b = leaveBalances(S.company, w, S.apApproved.filter(x => x.workerId === w.id)).find(x => x.id === r.typeId);
+        if (b && (b.ent + b.carry) > 0) extra = `<span class="badge ${b.left >= r.days ? 'b-ok' : 'b-bad'}">${L('Baki semasa', 'Current balance')}: ${b.left}</span>`;
+      }
+    } else if (r.kind === 'ot') {
+      detail = `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · <b>${r.approvedHours ?? r.hours}</b> ${L('jam', 'hrs')} · ${OT_LABEL[otKind(resolveDay(S.company, w, r.date))]()}`;
+    } else {
+      detail = `${fmtDate(r.date)} · ${TYPE_LABEL[r.type]?.() || r.type} <b>${esc(r.time)}</b>`;
+    }
+    return `<div class="card">
+      <div class="row between">
+        <div><b>${esc(r.name)}</b> <span class="xs muted mono">${esc(r.workerId)}</span></div>
+        <div class="row"><span class="badge b-brand">${REQ_LABEL[r.kind]()}</span>${STATUS_BADGE(r.status)}</div>
+      </div>
+      <div class="small" style="margin-top:.4rem">${detail} ${extra}</div>
+      ${r.reason ? `<div class="small muted" style="margin-top:.3rem">“${esc(r.reason)}”</div>` : ''}
+      ${r.attachment ? `<img src="${r.attachment}" class="thumb" style="width:64px;height:64px;margin-top:.5rem;border-radius:8px;object-fit:cover;cursor:pointer" data-att="${r.id}">` : ''}
+      ${r.adminNote ? `<div class="xs" style="margin-top:.3rem">💬 ${esc(r.adminNote)}</div>` : ''}
+      <div class="row between" style="margin-top:.6rem">
+        <span class="xs muted">${fmtDateTime(r.createdAt)}</span>
+        ${r.status === 'pending' ? `<div class="row">
+          <button class="btn btn-sm btn-danger" data-rej="${r.id}">${L('Tolak', 'Reject')}</button>
+          <button class="btn btn-sm btn-ok" data-ok="${r.id}">${icon('check', 16)} ${L('Lulus', 'Approve')}</button></div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  $$('[data-att]', box).forEach(im => im.onclick = () => modal({ title: L('Lampiran', 'Attachment'), body: `<img src="${im.src}" style="width:100%;border-radius:10px">` }));
+  $$('[data-ok]', box).forEach(b => b.onclick = () => decide(list.find(r => r.id === b.dataset.ok), true));
+  $$('[data-rej]', box).forEach(b => b.onclick = () => decide(list.find(r => r.id === b.dataset.rej), false));
+}
+
+function decide(r, ok) {
+  modal({
+    title: ok ? L('Luluskan permohonan', 'Approve request') : L('Tolak permohonan', 'Reject request'),
+    body: `<p class="small"><b>${esc(r.name)}</b> · ${REQ_LABEL[r.kind]()}</p>
+      ${ok && r.kind === 'ot' ? `<div class="field"><label class="lbl">${L('Jam OT diluluskan', 'Approved OT hours')}</label><input class="input" type="number" step="0.1" min="0" id="apH" value="${r.hours}"></div>` : ''}
+      ${ok && r.kind === 'fix' ? `<p class="small muted">${L('Rekod punch akan ditambah secara automatik:', 'A punch record will be added automatically:')} ${fmtDate(r.date)} ${esc(r.time)} · ${TYPE_LABEL[r.type]?.()}</p>` : ''}
+      <div class="field"><label class="lbl">${L('Catatan kepada pekerja (pilihan)', 'Note to staff (optional)')}</label><textarea class="input" id="apN" maxlength="300" style="min-height:60px"></textarea></div>`,
+    actions: [
+      { label: L('Batal', 'Cancel') },
+      {
+        label: ok ? L('Lulus', 'Approve') : L('Tolak', 'Reject'), cls: ok ? 'btn-ok' : 'btn-danger', onClick: async ({ el }) => {
+          try {
+            const b = writeBatch(db);
+            const upd = { status: ok ? 'approved' : 'rejected', decidedAt: serverTimestamp(), decidedBy: S.user.email || '', adminNote: $('#apN', el).value.trim() };
+            if (ok && r.kind === 'ot') upd.approvedHours = Number($('#apH', el).value || 0);
+            b.update(doc(db, 'companies', S.cid, 'requests', r.id), upd);
+            if (ok && r.kind === 'fix') {
+              const ts = new Date(`${r.date}T${r.time}:00`);
+              b.set(doc(sub('attendance')), {
+                uid: r.uid, workerId: r.workerId, name: r.name, type: r.type, ts: Timestamp.fromDate(ts), date: r.date,
+                lid: null, locName: L('Pembetulan', 'Correction'), method: 'fix', lat: null, lng: null, acc: null, dist: null,
+                selfie: null, deviceId: '', fixed: true, reqId: r.id, by: S.user.email || ''
+              });
+            }
+            await b.commit();
+            S.apApproved = null;
+            toast(ok ? L('Diluluskan.', 'Approved.') : L('Ditolak.', 'Rejected.'));
+            if (S.apTab !== 'pending') drawApprovals();
+          } catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
 }

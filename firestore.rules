@@ -120,7 +120,35 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/companies/$(cid)/workers/$(request.resource.data.workerId)).data.uid == request.auth.uid
           && get(/databases/$(database)/documents/companies/$(cid)/workers/$(request.resource.data.workerId)).data.active == true
           && companyActive(cid);
+        // Admin boleh tambah rekod manual (cth: pembetulan punch diluluskan)
+        allow create: if isAdminOf(cid);
         allow update, delete: if isAdminOf(cid);
+      }
+
+      // Jadual syif: satu dokumen setiap tarikh { a: { workerId: shiftId | 'off' } }
+      match /roster/{date} {
+        allow read: if isAdminOf(cid) || isWorkerOf(cid) || isSuper();
+        allow write: if isAdminOf(cid);
+      }
+
+      // Permohonan pekerja: cuti / OT / pembetulan punch
+      match /requests/{rid} {
+        allow read: if isSuper() || isAdminOf(cid)
+          || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create: if isWorkerOf(cid)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.kind in ['leave', 'ot', 'fix']
+          && get(/databases/$(database)/documents/companies/$(cid)/workers/$(request.resource.data.workerId)).data.uid == request.auth.uid
+          && companyActive(cid);
+        // Pekerja hanya boleh batalkan permohonan sendiri yang masih menunggu
+        allow update: if isAdminOf(cid) || (
+          isWorkerOf(cid) && resource.data.uid == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+        );
+        allow delete: if isAdminOf(cid);
       }
     }
 

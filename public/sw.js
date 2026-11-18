@@ -1,6 +1,6 @@
 // ProAttendance service worker — network-first, cache sebagai sandaran
-const CACHE = 'pa-v1';
-const SHELL = ['/', '/index.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/icon.svg', '/manifest.json'];
+const CACHE = 'pa-v2';
+const SHELL = ['/', '/index.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/js/sched.js', '/icon.svg', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}));

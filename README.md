@@ -69,3 +69,14 @@ Then go to **Pakej & Harga** and set the trial length, the prices and the Toyyib
 - Admin: live dashboard, worker list with allowances (+) and deductions (+), allowance templates, locations, reports (Excel/PDF), announcements, settings, subscription
 - Super Admin: companies, editable plans and prices, editable trial length, payments, statistics
 - ToyyibPay payments, with payment status checked directly with ToyyibPay
+
+## Phase 2 (F2) — done
+- Shift templates (+) and a weekly roster for each worker (copy last week, clear)
+- Default shift and work days for each worker (night shifts that cross midnight are supported)
+- Leave / MC with an attachment, half days, yearly entitlement plus carry forward, and leave balances
+- Public holidays (+), fixed national holidays, and copy from last year
+- OT requests, with OT rates for normal days, rest days and public holidays
+- Punch corrections (forgotten punches): once approved, the punch is added automatically
+- An Approvals page (pending / history), plus a pending badge on the dashboard
+- Reports: leave, absences based on roster/shifts/holidays, and OT by category
+- WhatsApp: worker → employer, and admin → worker
