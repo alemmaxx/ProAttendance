@@ -82,12 +82,12 @@ Then go to **Pakej & Harga** and set the trial length and the prices.
 - WhatsApp: worker → employer, and admin → worker
 
 ## Phase 3 (F3) — done
-- Payroll: generate each month's draft automatically (basic pay, allowances, approved OT, leave, absences, lateness, claims, advances, contributions)
+- Payroll: generate each month's draft automatically (basic pay, allowances, approved OT, leave, absences, lateness, advances, contributions — **claims are NOT included**)
 - Every line is editable with (+), with a "Recalculate contributions" button
 - Contribution rates (EPF, SOCSO, EIS) are entered manually as percentages in Payroll Settings, or as fixed amounts per worker (PCB included)
-- Lock & Publish: payslips reach workers, claims and advances are marked paid, and "one-time" items are removed
+- Lock & Publish: payslips reach workers, advances are marked paid, and "one-time" items are removed
 - Payslips as PDF (print) with the company logo, a bulk print of all slips, Excel export, and a bank file (CSV)
-- Workers: claims (with receipt photo), salary advances, and their payslips in the Profil tab
+- Workers: monthly claim form, salary advances, and their payslips in the Profil tab
 
 ## Phase 4 (F4) — done
 - **Kiosk mode** (`/kiosk.html`): one tablet at the entrance; workers punch with ID + PIN or by scanning their QR staff card
@@ -128,6 +128,10 @@ Admin → Settings → **Demo Data** → "Isi Data Demo". It fills the company w
 - **Automatic OT**: when a worker clocks out after shift end, or comes back to work at night, the OT hours (after the minimum and rounding) are sent automatically to **Approvals** marked **AUTO**. The boss can approve, change the hours, or reject — and a rejection requires a reason. Rest days and public holidays: all hours count as OT.
 - **Staff calendar**: the Rekod tab shows a monthly calendar (present / late / leave / absent / rest). Workers can tap any day to add a note of where they are going (optional). The boss sees it in the weekly roster and on the dashboard.
 - **Worker Punch screen**: the calendar for this week (‹ ›) sits at the top, along with the remaining leave balance. Tapping a date shows the attendance, site visits, claims and note for that day, plus buttons for **Tuntutan untuk hari itu** (mileage km × rate, toll…) and **Betulkan punch**.
-- **Mileage claims**: Settings → Clock-in → "Kadar tuntutan perbatuan" (RM/km). Workers enter the km and the amount is calculated automatically.
-- **Claims with multiple receipts**: workers add items one by one to a **draft** (mileage km, toll, parking, fuel, outstation allowance per day, overnight allowance per night, meals, hotel, transport, others). Each item has a date, receipt/invoice no., amount, description and receipt photo. A "Review & Submit" screen shows every item plus the total before the worker confirms and sends it to the boss. Workers can also see their totals: Draft / Pending / Approved, not yet paid / Paid this year.
+- **Monthly Claim Form (follows the company Excel format)**: claims are a **separate approval document**. They do NOT go into the payslip; only OT goes into the payslip.
+  - Workers fill one form per month: **Journey** (date, From/To, project, km, toll, parking, others, outstation, overnight, PM Main/Assistant), **Purchases/receipts** (supplier, SST code, invoice no., category, amount, 8% SST, receipt photo) and **Allowances**. Then they press Preview to see the full document before **Submit**.
+  - The document produces 4 forms, just like the Excel: EXPENSES PROJECT CLAIM FORM (summary by project, −RM50 mileage offset, Less Advance, Balance Due, Total Allowance, Claim Reimbursement), ALLOWANCE CLAIM FORM, SST PURCHASES CLAIM FORM and EXPENSES CLAIM JUSTIFICATION FORM, plus a receipts appendix.
+  - Admin → **Tuntutan**: filter by month, open a claim, then **Lulus** (Approved by is recorded), **Tolak** (reason required; the worker can fix it and resubmit) or **Tanda dibayar** (payment reference). Also available: Print/PDF, Excel (4 sheets), and a month summary in Excel.
+  - Settings → **Borang Tuntutan — Kadar & Projek**: RM/km (0.80), outstation (15), overnight (25), PM Main (7), PM Assistant (4.50), offset (50), SST (8%), and a project list.
+
 - Admin → Settings: rates for **mileage (RM/km)**, **outstation (RM/day)** and **overnight (RM/night)**. Approvals shows a table of the receipt items with photos.

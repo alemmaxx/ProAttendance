@@ -109,12 +109,8 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
     earnings.push({ name: L('Bonus kehadiran penuh', 'Perfect attendance bonus'), note: '', amount: r2(P.perfectBonus), kind: 'bonus', epf: true, socso: true });
   }
 
-  // Tuntutan (claims) — bayaran balik, tidak kena caruman
+  // Tuntutan (claims) TIDAK masuk slip gaji — diurus melalui Borang Tuntutan berasingan
   const claimIds = [];
-  reqs.filter(r => r.kind === 'claim' && !r.paidPeriod && (r.date || '') <= to).forEach(r => {
-    claimIds.push(r.id);
-    earnings.push({ name: `${L('Tuntutan', 'Claim')}: ${r.category || ''}`.trim(), note: r.date ? fmtDate(r.date) : '', amount: r2(r.approvedAmount ?? r.amount), kind: 'claim', epf: false, socso: false });
-  });
 
   // Potongan tanpa gaji / tidak hadir (gaji bulanan)
   if (w.payType !== 'daily' && w.payType !== 'hourly') {

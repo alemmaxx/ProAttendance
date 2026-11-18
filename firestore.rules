@@ -224,6 +224,26 @@ service cloud.firestore {
       match /hr/{wid} { allow read, write: if isFullAdmin(cid); }
       match /hrfiles/{fid} { allow read, write: if isFullAdmin(cid); }
 
+      // Borang tuntutan bulanan (dokumen kelulusan berasingan — tidak masuk slip gaji)
+      match /claims/{id} {
+        allow read: if isAdminOf(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create: if (isWorkerOf(cid) && companyActive(cid)
+                          && request.resource.data.uid == request.auth.uid
+                          && request.resource.data.status in ['draft', 'submitted'])
+                      || (isFullAdmin(cid) && request.resource.data.demo == true);
+        allow update: if isAdminOf(cid)
+                      || (isWorkerOf(cid) && resource.data.uid == request.auth.uid
+                          && resource.data.status in ['draft', 'rejected']
+                          && request.resource.data.uid == request.auth.uid
+                          && request.resource.data.status in ['draft', 'submitted']);
+        allow delete: if isFullAdmin(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid && resource.data.status == 'draft');
+      }
+      match /claimFiles/{fid} {
+        allow read: if isAdminOf(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create: if isWorkerOf(cid) && request.resource.data.uid == request.auth.uid;
+        allow delete: if isFullAdmin(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+      }
+
       // Token notifikasi push (dibaca oleh Cloud Functions sahaja)
       match /tokens/{uid} {
         allow create, update: if request.auth != null && request.auth.uid == uid && (isWorkerOf(cid) || isAdminOf(cid));

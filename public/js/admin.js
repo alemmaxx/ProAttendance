@@ -23,6 +23,7 @@ import {
   computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2
 } from './payroll.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
+import { computeClaim, claimRates, CLAIM_RATE_DEFAULTS, claimDocHtml, claimExcel, statusBadge as claimBadge } from './claims.js';
 
 const app = $('#app');
 const S = {
@@ -291,7 +292,8 @@ const NAV = () => [
   ['dashboard', 'home', L('Dashboard', 'Dashboard')],
   ['workers', 'users', L('Pekerja', 'Staff')],
   ['roster', 'cal', L('Syif & Jadual', 'Shifts & Roster')],
-  ['approvals', 'check', L('Kelulusan', 'Approvals')],
+  ['approvals', 'check', L('Kelulusan (Cuti/OT)', 'Approvals (Leave/OT)')],
+  ['claims', 'doc', L('Tuntutan', 'Claims')],
   ['tasks', 'doc', L('Tugasan', 'Tasks')],
   ['payroll', 'money', L('Gaji', 'Payroll')],
   ['hr', 'shield', L('Fail HR', 'HR Files')],
@@ -300,7 +302,7 @@ const NAV = () => [
   ['news', 'bell', L('Pengumuman', 'Announcements')],
   ['settings', 'gear', L('Tetapan', 'Settings')],
   ['billing', 'card', L('Langganan', 'Subscription')]
-].filter(([k]) => !isSupervisor() || ['dashboard', 'roster', 'approvals', 'tasks', 'reports', 'news'].includes(k))
+].filter(([k]) => !isSupervisor() || ['dashboard', 'roster', 'approvals', 'claims', 'tasks', 'reports', 'news'].includes(k))
  .filter(([k]) => k !== 'billing' || isOwner());
 
 function renderShell() {
@@ -386,7 +388,8 @@ function go(v) {
     dashboard: [L('Kehadiran hari ini.', "Today's attendance."), fmtDate(todayStr(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })],
     workers: [L('Senarai pekerja.', 'Your staff.'), L('Tambah pekerja, elaun (+), potongan & kad pekerja.', 'Add staff, allowances (+), deductions & staff cards.')],
     roster: [L('Syif & jadual.', 'Shifts & roster.'), L('Templat syif dan jadual mingguan setiap pekerja.', 'Shift templates and each staff weekly roster.')],
-    approvals: [L('Kelulusan.', 'Approvals.'), L('Cuti, OT, pembetulan punch, tuntutan, pendahuluan & tukar syif.', 'Leave, OT, punch fixes, claims, advances & shift swaps.')],
+    approvals: [L('Kelulusan.', 'Approvals.'), L('Cuti, OT (masuk slip gaji), pembetulan punch, pendahuluan & tukar syif.', 'Leave, OT (goes to payslip), punch fixes, advances & shift swaps.')],
+    claims: [L('Tuntutan pekerja.', 'Staff claims.'), L('Borang tuntutan bulanan — dokumen kelulusan berasingan, tidak masuk slip gaji.', 'Monthly claim forms — separate approval document, not in the payslip.')],
     tasks: [L('Tugasan harian.', 'Daily tasks.'), L('Beri tugasan dan semak yang sudah siap.', 'Assign tasks and check what is done.')],
     payroll: [L('Gaji pekerja.', 'Payroll.'), L('Jana, semak, kunci & terbit slip gaji.', 'Generate, review, lock & publish payslips.')],
     hr: [L('Fail HR.', 'HR files.'), L('Dokumen, amaran, prestasi, aset, pinjaman & onboarding.', 'Documents, warnings, reviews, assets, loans & onboarding.')],
@@ -400,7 +403,7 @@ function go(v) {
   $('#vH').textContent = H[0];
   $('#vSub').textContent = H[1];
   ({ dashboard: viewDashboard, workers: viewWorkers, locations: viewLocations, reports: viewReports,
-     news: viewNews, settings: viewSettings, billing: viewBilling, roster: viewRoster, approvals: viewApprovals, payroll: viewPayroll, tasks: viewTasks, hr: viewHR })[v]();
+     news: viewNews, settings: viewSettings, billing: viewBilling, roster: viewRoster, approvals: viewApprovals, payroll: viewPayroll, tasks: viewTasks, hr: viewHR, claims: viewClaims })[v]();
   window.scrollTo(0, 0);
 }
 
@@ -1223,6 +1226,27 @@ function viewSettings() {
   </div>
 
   <div class="card">
+    <h3>${L('Borang Tuntutan — Kadar & Projek', 'Claim Form — Rates & Projects')}</h3>
+    <p class="small muted">${L('Kadar ini digunakan dalam borang tuntutan bulanan pekerja (Justification, Allowance & Claim Form).', 'These rates are used in the staff monthly claim form (Justification, Allowance & Claim Form).')}</p>
+    <div class="grid3">
+      <div class="field"><label class="lbl">Mileage (RM/km)</label><input class="input" type="number" step="0.01" min="0" id="crKm" value="${claimRates(c).km}"></div>
+      <div class="field"><label class="lbl">Outstation (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOut" value="${claimRates(c).outstation}"></div>
+      <div class="field"><label class="lbl">Overnight (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOver" value="${claimRates(c).overnight}"></div>
+      <div class="field"><label class="lbl">${L('Elaun A — nama', 'Allowance A — name')}</label><input class="input" id="crA1n" value="${esc(claimRates(c).a1Name)}"></div>
+      <div class="field"><label class="lbl">${L('Elaun A — RM', 'Allowance A — RM')}</label><input class="input" type="number" step="0.01" min="0" id="crA1" value="${claimRates(c).a1Rate}"></div>
+      <div class="field"><label class="lbl">Mileage allowance offset (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOff" value="${claimRates(c).offset}"></div>
+      <div class="field"><label class="lbl">${L('Elaun B — nama', 'Allowance B — name')}</label><input class="input" id="crA2n" value="${esc(claimRates(c).a2Name)}"></div>
+      <div class="field"><label class="lbl">${L('Elaun B — RM', 'Allowance B — RM')}</label><input class="input" type="number" step="0.01" min="0" id="crA2" value="${claimRates(c).a2Rate}"></div>
+      <div class="field"><label class="lbl">SST (%)</label><input class="input" type="number" step="0.1" min="0" id="crSst" value="${claimRates(c).sst}"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" id="crSave">${L('Simpan Kadar', 'Save Rates')}</button>
+    <div class="sec-title">${L('Senarai Projek (Purpose of Journey / Remark)', 'Project List (Purpose of Journey / Remark)')}</div>
+    <div class="chips" id="prjChips" style="margin-bottom:.7rem"></div>
+    <div class="row"><input class="input grow" id="prjIn" style="max-width:340px" placeholder="${L('Nama projek', 'Project name')}">
+      <button class="btn btn-plus" id="prjAdd">${icon('plus', 16)} ${L('Tambah', 'Add')}</button></div>
+  </div>
+
+  <div class="card">
     <h3>${L('Jenis Cuti', 'Leave Types')}</h3>
     <p class="small muted">${L('Kelayakan lalai setahun. Boleh diubah untuk setiap pekerja.', 'Default yearly entitlement. Can be changed per staff.')}</p>
     <div id="ltBox">${leaveTypes(c).map(ltRow).join('')}</div>
@@ -1367,6 +1391,28 @@ function viewSettings() {
   });
   $('#bkBtn').onclick = (e) => backupAll(e.currentTarget);
   if ($('#admList')) { drawAdmins(); $('#admAdd').onclick = addAdmin; }
+
+  // Kadar tuntutan & projek
+  $('#crSave').onclick = async (e) => {
+    const v = (id) => Number($('#' + id).value || 0);
+    busy(e.currentTarget, true);
+    try {
+      await updateDoc(cRef(), { claimRates: { km: v('crKm'), outstation: v('crOut'), overnight: v('crOver'), a1Name: $('#crA1n').value.trim() || 'Allowance A', a1Rate: v('crA1'), a2Name: $('#crA2n').value.trim() || 'Allowance B', a2Rate: v('crA2'), offset: v('crOff'), sst: v('crSst') } });
+      logAct('settings.claimRates'); toast(L('Kadar disimpan.', 'Rates saved.'));
+    } catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  const drawPrj = () => {
+    const d = S.company.projects || [];
+    $('#prjChips').innerHTML = d.length ? d.map((x, i) => `<span class="chip">${esc(x)}<button data-pdx="${i}">✕</button></span>`).join('') : `<span class="small muted">${L('Tiada projek.', 'No projects.')}</span>`;
+    $$('[data-pdx]').forEach(b => b.onclick = async () => { const arr = [...(S.company.projects || [])]; arr.splice(Number(b.dataset.pdx), 1); await updateDoc(cRef(), { projects: arr }); S.company.projects = arr; drawPrj(); });
+  };
+  drawPrj();
+  $('#prjAdd').onclick = async () => {
+    const v = $('#prjIn').value.trim(); if (!v) return;
+    const arr = [...new Set([...(S.company.projects || []), v])];
+    await updateDoc(cRef(), { projects: arr }); S.company.projects = arr; $('#prjIn').value = ''; drawPrj();
+  };
 
   // Jenis cuti
   const ltBox = $('#ltBox'); bindDyn(ltBox);
@@ -2471,7 +2517,7 @@ async function showLogs() {
 async function backupAll(btn) {
   busy(btn, true);
   try {
-    const cols = ['workers', 'locations', 'roster', 'requests', 'attendance', 'payruns', 'payslips', 'announcements', 'tasks', 'hr', 'hrfiles'];
+    const cols = ['workers', 'locations', 'roster', 'requests', 'attendance', 'payruns', 'payslips', 'announcements', 'tasks', 'hr', 'hrfiles', 'claims'];
     const out = { exportedAt: new Date().toISOString(), company: S.company };
     for (const c of cols) {
       try { const s = await getDocs(sub(c)); out[c] = s.docs.map(d => ({ _id: d.id, ...d.data() })); } catch { out[c] = []; }
@@ -2528,7 +2574,7 @@ async function drawEA() {
 
 
 // ================================================================ DATA DEMO
-const DEMO_COLS = ['attendance', 'requests', 'tasks', 'announcements', 'hrfiles', 'hr', 'plans', 'workers'];
+const DEMO_COLS = ['attendance', 'requests', 'claims', 'tasks', 'announcements', 'hrfiles', 'hr', 'plans', 'workers'];
 
 async function seedDemo(btn) {
   if (S.workers.some(w => w.demo)) return toast(L('Data demo sudah ada. Padam dahulu jika mahu isi semula.', 'Demo data already exists. Delete it first to refill.'), 'warn', 5000);
@@ -2652,7 +2698,27 @@ async function seedDemo(btn) {
         { cat: 'parking', date: addDays(t, -2), amount: 10, inv: 'PK-55102', desc: 'Parkir Bank' },
         { cat: 'outstation', date: addDays(t, -2), qty: 2, rate: 50, amount: 100, inv: '', desc: L('Outstation 2 hari', '2-day outstation') }
       ] });
-    R(workers[0], { kind: 'claim', date: addDays(t, -6), amount: 80, approvedAmount: 80, category: L('Minyak', 'Fuel'), reason: L('Lawatan pembekal', 'Supplier visit'), status: 'approved' });
+    // Borang tuntutan bulanan (dokumen berasingan, ikut format Excel)
+    const mo = t.slice(0, 7), dd = (n) => `${mo}-${String(n).padStart(2, '0')}`, PJ = ['DMZ Sepang', 'Logger Puchong'];
+    ops.push(b => b.set(doc(db, 'companies', S.cid, 'claims', `${workers[0].id}_${mo}`), {
+      uid: uidOf(workers[0]), workerId: workers[0].id, name: workers[0].name, month: mo, status: 'submitted', submittedAt: serverTimestamp(), demo: true,
+      journeys: [
+        { date: dd(3), route: 'Puchong - Sepang - Puchong', project: PJ[0], km: 86, toll: 7.4, parking: 0, others: 0, outstation: 0, overnight: 0, a1: 1, a2: 0, remarks: L('Pasang logger', 'Install logger') },
+        { date: dd(5), route: 'Puchong - Kuantan', project: PJ[0], km: 250, toll: 32.5, parking: 6, others: 0, outstation: 1, overnight: 1, a1: 1, a2: 0, remarks: L('Lawatan tapak', 'Site visit') },
+        { date: dd(6), route: 'Kuantan - Puchong', project: PJ[0], km: 250, toll: 32.5, parking: 0, others: 0, outstation: 1, overnight: 0, a1: 1, a2: 0, remarks: '' },
+        { date: dd(9), route: 'Puchong - Bandar Kinrara', project: PJ[1], km: 24, toll: 2.1, parking: 4, others: 0, outstation: 0, overnight: 0, a1: 0, a2: 1, remarks: L('Semak sensor', 'Check sensor') }],
+      purchases: [
+        { date: dd(5), supplier: 'Hotel Seri Malaysia', sstCode: '', invoice: 'INV-88213', cat: 'LODGING', amount: 120, sst: 9.6, project: PJ[0] },
+        { date: dd(5), supplier: 'Restoran Pak Su', sstCode: '', invoice: 'R-1022', cat: 'FOOD AND BEVERAGES', amount: 38.5, sst: 0, project: PJ[0] },
+        { date: dd(9), supplier: 'Mr DIY', sstCode: 'W10-1808-32000123', invoice: 'MD-55190', cat: 'TOOLS', amount: 46.3, sst: 3.7, project: PJ[1] }],
+      allowances: [], advance: 100, otherDetails: ''
+    }));
+    ops.push(b => b.set(doc(db, 'companies', S.cid, 'claims', `${workers[4].id}_${mo}`), {
+      uid: uidOf(workers[4]), workerId: workers[4].id, name: workers[4].name, month: mo, status: 'approved', submittedAt: serverTimestamp(), approvedBy: 'Demo Admin', approvedAt: t.split('-').reverse().join('/'), demo: true,
+      journeys: [{ date: dd(2), route: 'Puchong - Klang - Puchong', project: PJ[1], km: 60, toll: 4.2, parking: 3, others: 0, outstation: 0, overnight: 0, a1: 0, a2: 1, remarks: '' }],
+      purchases: [], allowances: [], advance: 0, otherDetails: ''
+    }));
+    if (!(S.company.projects || []).length) ops.push(b => b.update(cRef(), { projects: PJ }));
     R(workers[3], { kind: 'advance', date: addDays(t, -5), amount: 200, approvedAmount: 200, reason: L('Kecemasan', 'Emergency'), status: 'approved' });
     R(workers[5], { kind: 'fix', date: addDays(t, -1), time: '18:05', type: 'out', reason: L('Terlupa punch keluar', 'Forgot to clock out'), status: 'pending' });
     R(workers[6], { kind: 'swap', date: addDays(t, 2), withId: workers[7].id, reason: L('Urusan peribadi', 'Personal matters'), status: 'pending' });
@@ -2715,4 +2781,129 @@ async function clearDemo(btn) {
     toast(L('Data demo dipadam.', 'Demo data deleted.'));
   } catch (e) { toast(authErr(e), 'bad'); }
   finally { busy(btn, false); }
+}
+
+
+// ================================================================ TUNTUTAN (borang bulanan, dokumen berasingan)
+async function viewClaims() {
+  S.clMonth = S.clMonth || todayStr().slice(0, 7);
+  $('#view').innerHTML = `
+  <div class="card no-print"><div class="row between">
+    <div class="row"><label class="lbl" style="margin:0">${L('Bulan', 'Month')}</label><input type="month" class="input" id="clM" value="${S.clMonth}" style="width:auto"></div>
+    <div class="row"><select class="input" id="clF" style="width:auto">
+      <option value="">${L('Semua status', 'All statuses')}</option><option value="submitted">${L('Menunggu kelulusan', 'Pending')}</option>
+      <option value="approved">${L('Diluluskan', 'Approved')}</option><option value="paid">${L('Dibayar', 'Paid')}</option><option value="rejected">${L('Ditolak', 'Rejected')}</option><option value="draft">${L('Draf', 'Draft')}</option></select>
+      <button class="btn btn-sm btn-ghost" id="clX">${icon('dl', 16)} ${L('Ringkasan Excel', 'Summary Excel')}</button></div>
+  </div></div>
+  <div id="clOut" style="margin-top:12px"><div class="loader" style="min-height:120px"><span class="spin"></span></div></div>`;
+  $('#clM').onchange = (e) => { S.clMonth = e.target.value; viewClaims(); };
+  let list = [];
+  try {
+    const s = await getDocs(query(sub('claims'), where('month', '==', S.clMonth)));
+    list = s.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { $('#clOut').innerHTML = `<div class="card"><div class="empty">${esc(authErr(e))}</div></div>`; return; }
+  const order = { submitted: 0, approved: 1, rejected: 2, paid: 3, draft: 4 };
+  const draw = () => {
+    const f = $('#clF').value;
+    const rows = list.filter(x => !f || x.status === f).sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || (a.workerId || '').localeCompare(b.workerId || ''));
+    const tot = (st) => list.filter(x => st.includes(x.status)).reduce((a, x) => a + computeClaim(x, S.company).reimbursement, 0);
+    $('#clOut').innerHTML = `
+      <div class="stats">
+        <div class="stat warn"><div class="n" style="font-size:1.15rem">${money(tot(['submitted']))}</div><div class="t">${L('Menunggu kelulusan', 'Pending')}</div></div>
+        <div class="stat info"><div class="n" style="font-size:1.15rem">${money(tot(['approved']))}</div><div class="t">${L('Lulus, belum dibayar', 'Approved, unpaid')}</div></div>
+        <div class="stat ok"><div class="n" style="font-size:1.15rem">${money(tot(['paid']))}</div><div class="t">${L('Dibayar', 'Paid')}</div></div>
+      </div>
+      <div class="card">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th class="right">Claim</th><th class="right">Allowance</th><th class="right">Reimbursement</th><th>${L('Status', 'Status')}</th><th></th></tr></thead><tbody>
+        ${rows.map(x => { const X = computeClaim(x, S.company); return `<tr><td><b>${esc(x.name)}</b><div class="xs muted mono">${esc(x.workerId)}</div></td>
+          <td class="right">${money(X.claimTotal)}</td><td class="right">${money(X.allowanceTotal)}</td><td class="right bold">${money(X.reimbursement)}</td>
+          <td>${claimBadge(x.status)}${x.paidRef ? `<div class="xs muted">${esc(x.paidRef)}</div>` : ''}</td>
+          <td class="right"><button class="btn btn-sm btn-soft" data-cl="${esc(x.id)}">${L('Buka', 'Open')}</button></td></tr>`; }).join('')}</tbody></table></div>`
+        : `<div class="empty">${L('Tiada tuntutan untuk bulan ini.', 'No claims for this month.')}</div>`}</div>`;
+    $$('[data-cl]').forEach(b => b.onclick = () => openClaimAdmin(list.find(x => x.id === b.dataset.cl), () => viewClaims()));
+  };
+  $('#clF').onchange = draw;
+  $('#clX').onclick = () => {
+    if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
+    const aoa = [[S.company.name], [`Claims ${S.clMonth}`], [], ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/Overnight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total Expenses', 'Less Advance', 'Balance Due', 'Total (Allowance)', 'Claim Reimbursement', 'Approved by', 'Paid ref']];
+    list.forEach(x => { const X = computeClaim(x, S.company); aoa.push([x.workerId, x.name, x.status, X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others, X.totalExpenses, X.advance, X.balanceDue, X.allowanceTotal, X.reimbursement, x.approvedBy || '', x.paidRef || '']); });
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), S.clMonth);
+    XLSX.writeFile(wb, `Claims_${S.company.code}_${S.clMonth}.xlsx`);
+  };
+  draw();
+}
+
+async function claimFiles(cl) {
+  const ids = (cl.purchases || []).map(p => p.fileId).filter(Boolean), out = {};
+  await Promise.all(ids.map(id => getDoc(doc(db, 'companies', S.cid, 'claimFiles', id)).then(s => { if (s.exists()) out[id] = s.data().img; }).catch(() => {})));
+  return out;
+}
+
+function openClaimAdmin(cl, after) {
+  const X = computeClaim(cl, S.company);
+  const ref = doc(db, 'companies', S.cid, 'claims', cl.id);
+  const m = modal({
+    title: `${esc(cl.name)} · ${esc(cl.month)}`, wide: true,
+    body: `
+      <div class="row between" style="margin-bottom:.6rem">${claimBadge(cl.status)}<span class="xs muted">${cl.submittedAt ? L('Dihantar', 'Submitted') + ' ' + fmtDateTime(cl.submittedAt) : ''}</span></div>
+      <div class="stats">
+        <div class="stat"><div class="n" style="font-size:1.1rem">${money(X.claimTotal)}</div><div class="t">Total (Claim)</div></div>
+        <div class="stat info"><div class="n" style="font-size:1.1rem">${money(X.allowanceTotal)}</div><div class="t">Total (Allowance)</div></div>
+        <div class="stat ok"><div class="n" style="font-size:1.1rem">${money(X.reimbursement)}</div><div class="t">Claim Reimbursement</div></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>PROJECT</th><th class="right">MILEAGE</th><th class="right">TOLL</th><th class="right">TRAVEL</th><th class="right">OUTST/OVERN</th><th class="right">LODGING</th><th class="right">PARKING</th><th class="right">F&amp;B</th><th class="right">TOOLS</th><th class="right">STAT.</th><th class="right">MED.</th><th class="right">OTHERS</th><th class="right">TOTAL</th></tr></thead><tbody>
+        ${X.rows.map(r => `<tr><td>${esc(r.project)}</td>${['mileage', 'toll', 'travel', 'outOver', 'lodging', 'parking', 'fnb', 'tools', 'stationery', 'medical', 'others', 'total'].map(k => `<td class="right">${r[k].toFixed(2)}</td>`).join('')}</tr>`).join('')}
+        <tr><td>MILEAGE ALLOWANCE OFFSET</td><td class="right">${X.offset ? (-X.offset).toFixed(2) : '0.00'}</td><td colspan="11"></td></tr></tbody></table></div>
+      <div class="grid2" style="margin-top:.6rem"><div>
+        <div class="set-row"><span>Total Expenses</span><b>${money(X.totalExpenses)}</b></div>
+        <div class="set-row"><span>Less Advance</span><b>${money(X.advance)}</b></div>
+        <div class="set-row"><span>Balance Due</span><b>${money(X.balanceDue)}</b></div></div><div>
+        <div class="set-row"><span>Total (Allowance)</span><b>${money(X.allowanceTotal)}</b></div>
+        <div class="set-row"><span>Total (Claim)</span><b>${money(X.claimTotal)}</b></div>
+        <div class="set-row"><span><b>Claim Reimbursement</b></span><b style="color:var(--gold)">${money(X.reimbursement)}</b></div></div></div>
+      ${cl.approvedBy ? `<p class="small">✓ ${L('Diluluskan oleh', 'Approved by')} <b>${esc(cl.approvedBy)}</b> · ${esc(cl.approvedAt || '')}</p>` : ''}
+      ${cl.adminNote ? `<p class="small">💬 ${esc(cl.adminNote)}</p>` : ''}
+      <div class="row" style="margin-top:.6rem">
+        <button class="btn btn-ghost" id="cDoc">${icon('print', 16)} ${L('Dokumen penuh / PDF', 'Full document / PDF')}</button>
+        <button class="btn btn-ghost" id="cXl">${icon('dl', 16)} Excel</button>
+      </div>`,
+    actions: [
+      ...(cl.status === 'submitted' ? [
+        { label: L('Tolak', 'Reject'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
+        { label: L('Lulus', 'Approve'), cls: 'btn-ok', autoClose: false, onClick: () => { decideClaim(true); return false; } }] : []),
+      ...(cl.status === 'approved' ? [{ label: L('Tanda sudah dibayar', 'Mark as paid'), cls: 'btn-primary', autoClose: false, onClick: () => { markPaid(); return false; } }] : []),
+      { label: L('Tutup', 'Close') }
+    ]
+  });
+  $('#cDoc', m.el).onclick = async () => { const f = await claimFiles(cl); openPrint(claimDocHtml(S.company, cl, f), false) || toast(L('Benarkan pop-up.', 'Allow pop-ups.'), 'warn'); };
+  $('#cXl', m.el).onclick = () => claimExcel(S.company, cl) || toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
+  const decideClaim = (ok) => modal({
+    title: ok ? L('Luluskan tuntutan', 'Approve claim') : L('Tolak tuntutan', 'Reject claim'),
+    body: `<p class="small">${esc(cl.name)} · ${esc(cl.month)} · <b>${money(X.reimbursement)}</b></p>
+      ${ok ? `<div class="field"><label class="lbl">${L('Diluluskan oleh (nama)', 'Approved by (name)')}</label><input class="input" id="dBy" value="${esc(S.user.displayName || S.user.email || '')}"></div>` : ''}
+      <div class="field"><label class="lbl">${ok ? L('Catatan (pilihan)', 'Note (optional)') : L('Sebab ditolak (wajib)', 'Reason for rejection (required)')}</label><textarea class="input" id="dN" maxlength="300" style="min-height:60px"></textarea></div>`,
+    actions: [{ label: L('Batal', 'Cancel') }, {
+      label: ok ? L('Lulus', 'Approve') : L('Tolak', 'Reject'), cls: ok ? 'btn-ok' : 'btn-danger', onClick: async ({ el }) => {
+        const note = $('#dN', el).value.trim();
+        if (!ok && !note) { toast(L('Sila nyatakan sebab ditolak.', 'Please give a reason.'), 'warn'); return false; }
+        try {
+          await updateDoc(ref, ok
+            ? { status: 'approved', approvedBy: $('#dBy', el).value.trim() || S.user.email || '', approvedAt: todayStr().split('-').reverse().join('/'), decidedAt: serverTimestamp(), adminNote: note }
+            : { status: 'rejected', adminNote: note, decidedAt: serverTimestamp(), approvedBy: '', approvedAt: '' });
+          logAct(ok ? 'claim.approve' : 'claim.reject', cl.id);
+          toast(ok ? L('Diluluskan.', 'Approved.') : L('Ditolak.', 'Rejected.'));
+          m.close(); after && after();
+        } catch (e) { toast(authErr(e), 'bad'); return false; }
+      }
+    }]
+  });
+  const markPaid = () => modal({
+    title: L('Tanda sudah dibayar', 'Mark as paid'),
+    body: `<div class="field"><label class="lbl">${L('Rujukan bayaran (cth: no. transaksi bank, tarikh)', 'Payment reference (e.g. bank transaction no., date)')}</label><input class="input" id="pRef" value="${todayStr().split('-').reverse().join('/')}"></div>`,
+    actions: [{ label: L('Batal', 'Cancel') }, {
+      label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
+        try { await updateDoc(ref, { status: 'paid', paidRef: $('#pRef', el).value.trim(), paidAt: serverTimestamp() }); logAct('claim.paid', cl.id); m.close(); after && after(); }
+        catch (e) { toast(authErr(e), 'bad'); return false; }
+      }
+    }]
+  });
 }
