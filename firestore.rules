@@ -1,0 +1,133 @@
+rules_version = '2';
+
+// ProAttendance — Firestore database "proattendance" (projek kukusanmy)
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helper ----------
+    function signedIn() { return request.auth != null; }
+    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasUser() { return signedIn() && exists(userPath()); }
+    function me() { return get(userPath()).data; }
+    function superPath() { return /databases/$(database)/documents/config/super; }
+    function isSuper() { return signedIn() && exists(superPath()) && get(superPath()).data.uid == request.auth.uid; }
+    function isAdminOf(cid) { return hasUser() && me().role == 'admin' && me().cid == cid; }
+    function isWorkerOf(cid) { return hasUser() && me().role == 'worker' && me().cid == cid; }
+    function plansPath() { return /databases/$(database)/documents/config/plans; }
+    function trialDays() {
+      return exists(plansPath()) ? int(get(plansPath()).data.get('trialDays', 14)) : 14;
+    }
+    function companyDoc(cid) { return get(/databases/$(database)/documents/companies/$(cid)).data; }
+    function companyActive(cid) {
+      return companyDoc(cid).expiry > request.time && companyDoc(cid).status != 'suspended';
+    }
+    function protectedCompanyKeys() { return ['status', 'expiry', 'plan', 'ownerUid', 'code']; }
+
+    // ---------- Config (pakej, harga, super admin) ----------
+    match /config/super {
+      allow read: if signedIn();
+      // Akaun pertama yang menuntut menjadi Super Admin
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'at']);
+    }
+    match /config/{id} {
+      allow read: if true;
+      allow write: if isSuper();
+    }
+
+    // ---------- Pengguna (peranan) ----------
+    match /users/{uid} {
+      allow read: if signedIn() && (
+        request.auth.uid == uid || isSuper() ||
+        (hasUser() && me().role == 'admin' && resource.data.cid == me().cid)
+      );
+      allow create: if signedIn() && (
+        // Admin daftar syarikat sendiri
+        (request.auth.uid == uid
+          && request.resource.data.role == 'admin'
+          && request.resource.data.keys().hasOnly(['role', 'cid', 'email', 'createdAt'])
+          && getAfter(/databases/$(database)/documents/companies/$(request.resource.data.cid)).data.ownerUid == request.auth.uid)
+        ||
+        // Admin daftar pekerja
+        (request.resource.data.role == 'worker'
+          && request.resource.data.keys().hasOnly(['role', 'cid', 'workerId', 'createdAt'])
+          && isAdminOf(request.resource.data.cid))
+      );
+      allow update: if isSuper();
+      allow delete: if isSuper() || (resource.data.role == 'worker' && isAdminOf(resource.data.cid));
+    }
+
+    // ---------- Kod syarikat (untuk paparan logo semasa login pekerja) ----------
+    match /companyCodes/{code} {
+      allow read: if true;
+      allow create: if signedIn()
+        && code.matches('^[A-Z]{2,6}$')
+        && request.resource.data.keys().hasOnly(['cid', 'name', 'logo', 'color'])
+        && getAfter(/databases/$(database)/documents/companies/$(request.resource.data.cid)).data.ownerUid == request.auth.uid;
+      allow update: if isSuper() || (isAdminOf(resource.data.cid) && request.resource.data.cid == resource.data.cid);
+      allow delete: if isSuper();
+    }
+
+    // ---------- Syarikat ----------
+    match /companies/{cid} {
+      allow read: if isSuper() || isAdminOf(cid) || isWorkerOf(cid);
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.status == 'trial'
+        && request.resource.data.expiry is timestamp
+        && request.resource.data.expiry <= request.time + duration.value(trialDays() * 86400 + 600, 's')
+        && request.resource.data.code.matches('^[A-Z]{2,6}$')
+        && getAfter(/databases/$(database)/documents/companyCodes/$(request.resource.data.code)).data.cid == cid;
+      allow update: if isSuper() || (isAdminOf(cid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(protectedCompanyKeys()));
+      allow delete: if isSuper();
+
+      match /workers/{wid} {
+        allow read: if isSuper() || isAdminOf(cid)
+          || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create, delete: if isAdminOf(cid);
+        // Pekerja hanya boleh kemas kini medan tertentu pada rekod sendiri.
+        // deviceId hanya boleh diisi jika kosong (reset oleh admin).
+        // mustChangePin hanya boleh ditukar kepada false.
+        allow update: if isAdminOf(cid) || (
+          isWorkerOf(cid) && resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePin', 'deviceId', 'lastLogin', 'lang'])
+          && (resource.data.get('deviceId', null) == null
+              || request.resource.data.get('deviceId', null) == resource.data.get('deviceId', null))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['mustChangePin'])
+              || request.resource.data.mustChangePin == false)
+        );
+      }
+
+      match /locations/{lid} {
+        allow read: if isAdminOf(cid) || isWorkerOf(cid) || isSuper();
+        allow write: if isAdminOf(cid);
+      }
+
+      match /announcements/{aid} {
+        allow read: if isAdminOf(cid) || isWorkerOf(cid) || isSuper();
+        allow write: if isAdminOf(cid);
+      }
+
+      match /attendance/{rid} {
+        allow read: if isSuper() || isAdminOf(cid)
+          || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create: if isWorkerOf(cid)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.ts == request.time
+          && request.resource.data.type in ['in', 'out', 'break_in', 'break_out']
+          && get(/databases/$(database)/documents/companies/$(cid)/workers/$(request.resource.data.workerId)).data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/companies/$(cid)/workers/$(request.resource.data.workerId)).data.active == true
+          && companyActive(cid);
+        allow update, delete: if isAdminOf(cid);
+      }
+    }
+
+    // ---------- Bayaran langganan (ditulis oleh Cloud Functions sahaja) ----------
+    match /payments/{pid} {
+      allow read: if isSuper() || isAdminOf(resource.data.cid);
+      allow write: if false;
+    }
+  }
+}

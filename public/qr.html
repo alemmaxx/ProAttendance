@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProAttendance</title>
+  <meta name="theme-color" content="#1d4ed8">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+  <div id="app"><div class="loader"><span class="spin"></span></div></div>
+  <script type="module">
+    import { auth, db } from '/js/fb.js';
+    import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+    import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+    import { $, L, esc, applyBrand, logoHtml, qrPayload, qrWindow, QR_WINDOW_MS, isExpired } from '/js/ui.js';
+
+    const lid = new URLSearchParams(location.search).get('l');
+    const app = $('#app');
+    const fail = (m) => { app.innerHTML = `<div class="blocked"><div class="card"><p>${m}</p><a class="btn btn-primary" href="/admin.html">${L('Log masuk Admin', 'Admin login')}</a></div></div>`; };
+
+    onAuthStateChanged(auth, async (u) => {
+      if (!u) return fail(L('Sila log masuk sebagai admin pada peranti ini dahulu.', 'Please log in as admin on this device first.'));
+      try {
+        const me = (await getDoc(doc(db, 'users', u.uid))).data();
+        if (!me || me.role !== 'admin') return fail(L('Hanya admin boleh paparkan kod QR.', 'Only admins can display the QR code.'));
+        const [cS, lS] = await Promise.all([getDoc(doc(db, 'companies', me.cid)), getDoc(doc(db, 'companies', me.cid, 'locations', lid))]);
+        if (!lS.exists()) return fail(L('Lokasi tidak dijumpai.', 'Location not found.'));
+        const c = cS.data(), loc = lS.data();
+        applyBrand(c);
+        app.innerHTML = `
+          <div class="kiosk">
+            <div class="row" style="justify-content:center">${logoHtml(c, 'logo-lg')}</div>
+            <div><h2 style="margin:0">${esc(c.name)}</h2><div style="opacity:.85">${esc(loc.name)}</div></div>
+            <div class="big-time" id="clk">--:--:--</div>
+            <div class="qr-box"><div id="qr"></div></div>
+            <div class="bar"><i id="bar"></i></div>
+            <p style="opacity:.85;max-width:420px">${L('Buka app kehadiran pada telefon anda, tekan Punch, dan imbas kod ini. Kod bertukar setiap 30 saat.', 'Open the attendance app on your phone, tap Punch and scan this code. It changes every 30 seconds.')}</p>
+            ${isExpired(c) ? `<span class="badge b-bad">${L('Langganan tamat — pekerja tidak boleh punch', 'Subscription expired — staff cannot punch')}</span>` : ''}
+          </div>`;
+        const qr = new QRCode($('#qr'), { text: 'PA', width: 420, height: 420, correctLevel: QRCode.CorrectLevel.M });
+        let lastWin = -1;
+        const tick = async () => {
+          const now = Date.now(), w = qrWindow(now);
+          $('#clk').textContent = new Date().toLocaleTimeString('en-GB');
+          $('#bar').style.width = (100 - ((now % QR_WINDOW_MS) / QR_WINDOW_MS) * 100) + '%';
+          if (w !== lastWin) { lastWin = w; qr.clear(); qr.makeCode(await qrPayload(me.cid, lid, loc.qrSecret, w)); }
+        };
+        tick(); setInterval(tick, 1000);
+        try { await navigator.wakeLock?.request('screen'); } catch {}
+      } catch (e) { fail(esc(e.message)); }
+    });
+  </script>
+</body>
+</html>

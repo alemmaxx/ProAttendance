@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "kukusanmy"
+  },
+  "targets": {
+    "kukusanmy": {
+      "hosting": {
+        "proattendance": ["proattendance"]
+      }
+    }
+  }
+}
