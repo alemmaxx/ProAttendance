@@ -59,7 +59,7 @@ firebase deploy --only functions:proattendance
 ### 7. Claim Super Admin
 Open `/superadmin.html`, log in with your email, then press **"Ya, jadikan Super Admin"**. Do this **straight after the first deploy**, because only the first account to claim it becomes Super Admin.
 
-Then go to **Pakej & Harga** and set the trial length, the prices and the ToyyibPay category code.
+Then go to **Pakej & Harga** and set the trial length and the prices.
 
 ## Phase 1 (F1) — done
 - Worker login with ID + 6-digit PIN (PIN must be changed on first login)
@@ -67,7 +67,7 @@ Then go to **Pakej & Harga** and set the trial length, the prices and the Toyyib
 - Three clock-in modes per location: plain button / GPS + geofence / dynamic QR
 - Selfie on punch (on/off) and one phone per worker (on/off)
 - Admin: live dashboard, worker list with allowances (+) and deductions (+), allowance templates, locations, reports (Excel/PDF), announcements, settings, subscription
-- Super Admin: companies, editable plans and prices, editable trial length, payments, statistics
+- Super Admin: companies, editable plans and prices, editable trial length, payments, statistics (the ToyyibPay category is fixed in `functions/index.js`)
 - ToyyibPay payments, with payment status checked directly with ToyyibPay
 
 ## Phase 2 (F2) — done

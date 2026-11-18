@@ -13,6 +13,7 @@ const TOYYIB_KEY = defineSecret('TOYYIBPAY_SECRET_KEY'); // dikongsi dengan KUKU
 const REGION = 'asia-southeast1';
 const TOYYIB = 'https://toyyibpay.com';
 const SITE = 'https://proattendancemy.web.app';
+const TOYYIB_CATEGORY = 'mqp1yoga'; // kategori ToyyibPay ProAttendance
 const PLAN_MONTHS = { monthly: 1, sixMonth: 6, yearly: 12 };
 const PLAN_NAME = { monthly: 'Bulanan', sixMonth: '6 Bulan', yearly: 'Tahunan' };
 
@@ -66,7 +67,6 @@ exports.pa_createBill = onCall({ region: REGION, secrets: [TOYYIB_KEY] }, async 
   const cfg = (await db.doc('config/plans').get()).data() || {};
   const price = Number(cfg[plan] || 0);
   if (!(price > 0)) throw new HttpsError('failed-precondition', 'Harga pakej belum ditetapkan.');
-  if (!cfg.toyyibCategory) throw new HttpsError('failed-precondition', 'Kategori ToyyibPay belum ditetapkan.');
 
   const comp = (await db.doc(`companies/${me.cid}`).get()).data() || {};
   const ref = db.collection('payments').doc();
@@ -75,7 +75,7 @@ exports.pa_createBill = onCall({ region: REGION, secrets: [TOYYIB_KEY] }, async 
 
   const body = new URLSearchParams({
     userSecretKey: TOYYIB_KEY.value(),
-    categoryCode: cfg.toyyibCategory,
+    categoryCode: TOYYIB_CATEGORY,
     billName: clean(`Langganan ${PLAN_NAME[plan]}`, 30),
     billDescription: clean(`${comp.name || ''} ${comp.code || ''} langganan ${months} bulan`, 100),
     billPriceSetting: '1',

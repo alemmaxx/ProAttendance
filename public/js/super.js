@@ -64,7 +64,7 @@ function renderClaim() {
   $('#cl').onclick = async () => {
     try {
       await setDoc(doc(db, 'config', 'super'), { uid: S.user.uid, email: S.user.email || '', at: serverTimestamp() });
-      await setDoc(doc(db, 'config', 'plans'), { trialDays: 14, monthly: 29, sixMonth: 159, yearly: 290, toyyibCategory: '' }, { merge: true });
+      await setDoc(doc(db, 'config', 'plans'), { trialDays: 14, monthly: 29, sixMonth: 159, yearly: 290 }, { merge: true });
       toast('OK'); renderShell();
     } catch (e) { toast(authErr(e), 'bad'); }
   };
@@ -209,9 +209,6 @@ async function viewPlans() {
       <div class="field"><label class="lbl">${L('6 Bulan (RM)', '6 Months (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="p6" value="${p.sixMonth ?? 0}"></div>
       <div class="field"><label class="lbl">${L('Tahunan (RM)', 'Yearly (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="py" value="${p.yearly ?? 0}"></div>
     </div>
-    <div class="sec-title">ToyyibPay</div>
-    <div class="field"><label class="lbl">${L('Kod kategori ToyyibPay (ProAttendance)', 'ToyyibPay category code (ProAttendance)')}</label><input class="input mono" id="tc" value="${esc(p.toyyibCategory || '')}"></div>
-    <p class="xs muted">${L('Secret key dikongsi dengan KUKUSAN/ProSewa (TOYYIBPAY_SECRET_KEY dalam Cloud Functions).', 'Secret key is shared with KUKUSAN/ProSewa (TOYYIBPAY_SECRET_KEY in Cloud Functions).')}</p>
     <button class="btn btn-primary" id="sv" style="margin-top:.8rem">${L('Simpan', 'Save')}</button>
   </div>`;
   $('#sv').onclick = async (e) => {
@@ -219,7 +216,7 @@ async function viewPlans() {
     try {
       await setDoc(doc(db, 'config', 'plans'), {
         trialDays: Math.round(Number($('#td').value || 0)), monthly: Number($('#pm').value || 0),
-        sixMonth: Number($('#p6').value || 0), yearly: Number($('#py').value || 0), toyyibCategory: $('#tc').value.trim()
+        sixMonth: Number($('#p6').value || 0), yearly: Number($('#py').value || 0)
       }, { merge: true });
       toast(L('Disimpan.', 'Saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }
