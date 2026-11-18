@@ -1,6 +1,6 @@
 // ProAttendance — Syif, jadual, cuti umum & cuti (Fasa 2)
-import { L, todayStr, addDays } from './ui.js';
-import { collection, query, where, getDocs, documentId } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { L, todayStr, addDays, summarizeDay } from './ui.js';
+import { collection, query, where, getDocs, documentId, doc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 // ---------- Jenis cuti ----------
 export const DEFAULT_LEAVE_TYPES = () => [
@@ -56,9 +56,69 @@ export function resolveDay(c, w, date, rosterVal) {
 }
 // Tetapan untuk kiraan lewat
 export function lateSettings(c, day) {
-  if (!day?.shift) return {};
-  return { workStart: day.shift.start, grace: day.shift.grace ?? c?.settings?.grace ?? 10 };
+  const st = c?.settings || {};
+  const brk = {
+    autoBreak: !!st.autoBreak,
+    breakStart: day?.shift?.bStart || st.breakStart || '',
+    breakEnd: day?.shift?.bEnd || st.breakEnd || ''
+  };
+  if (!day?.shift) return brk;
+  return { ...brk, workStart: day.shift.start, grace: day.shift.grace ?? st.grace ?? 10 };
 }
+
+// ---------- OT automatik ----------
+// Kira minit OT bagi sehari: masa bekerja selepas tamat syif (termasuk masuk semula waktu malam).
+// Hari rehat / cuti umum: semua masa bekerja dikira OT.
+export function computeAutoOT(c, w, date, recs, rosterVal) {
+  const st = c?.settings || {};
+  const day = resolveDay(c, w, date, rosterVal);
+  const ls = lateSettings(c, day);
+  const s = summarizeDay(recs, ls, date);
+  const done = s.intervals.filter((_, i) => i < s.intervals.length - (s.open ? 1 : 0));
+  const brk = (a, b) => s.breakWin ? Math.max(0, Math.min(b, s.breakWin[1]) - Math.max(a, s.breakWin[0])) : 0;
+  let mins = 0, from = null, to = null;
+  const offDay = day.type !== 'work' || !day.shift;
+  const endMs = !offDay ? (() => {
+    const [sh, sm] = day.shift.start.split(':').map(Number), [eh, em] = day.shift.end.split(':').map(Number);
+    const d0 = new Date(date + 'T00:00:00');
+    const sMs = new Date(d0).setHours(sh, sm, 0, 0);
+    let eMs = new Date(d0).setHours(eh, em, 0, 0);
+    if (eMs <= sMs) eMs += 86400000;
+    return eMs;
+  })() : null;
+  done.forEach(([a, b]) => {
+    const st0 = offDay ? a : Math.max(a, endMs);
+    if (b <= st0) return;
+    mins += (b - st0 - brk(st0, b)) / 60000;
+    if (from === null || st0 < from) from = st0;
+    if (to === null || b > to) to = b;
+  });
+  const round = Number(st.otRound || 15), min = Number(st.otMin ?? 30);
+  mins = Math.floor(mins / round) * round;
+  if (mins < min) mins = 0;
+  return { mins, from, to, kind: otKind(day), offDay };
+}
+
+// Hantar permohonan OT automatik (baki yang belum dimohon) untuk kelulusan majikan
+export async function submitAutoOT(dbx, cid, c, w, uid, date, recs, rosterVal, existing) {
+  if (!c?.settings?.autoOT) return 0;
+  const r = computeAutoOT(c, w, date, recs, rosterVal);
+  if (!r.mins) return 0;
+  const already = existing.filter(x => x.kind === 'ot' && x.auto && x.date === date && !['rejected', 'cancelled'].includes(x.status))
+    .reduce((a, x) => a + Number(x.hours || 0), 0);
+  const hours = Math.round((r.mins / 60 - already) * 100) / 100;
+  if (hours < (Number(c.settings.otMin ?? 30) / 60) - 0.001) return 0;
+  const hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const n = existing.filter(x => x.kind === 'ot' && x.auto && x.date === date).length + 1;
+  await setDoc(doc(dbx, 'companies', cid, 'requests', `auto_${w.id}_${date}_${n}`), {
+    uid, workerId: w.id, name: w.name, kind: 'ot', auto: true, status: 'pending', createdAt: serverTimestamp(),
+    date, start: hm(r.from), end: hm(r.to), hours, otKind: r.kind,
+    reason: r.offDay ? L('Auto: bekerja pada hari rehat / cuti umum', 'Auto: worked on a rest day / public holiday')
+      : L('Auto: bekerja selepas tamat syif', 'Auto: worked after shift end')
+  });
+  return hours;
+}
+
 // Jenis OT ikut hari
 export const otKind = (day) => day?.type === 'holiday' ? 'holiday' : day?.type === 'off' ? 'rest' : 'normal';
 export const OT_LABEL = { normal: () => L('Hari biasa', 'Normal day'), rest: () => L('Hari rehat', 'Rest day'), holiday: () => L('Cuti umum', 'Public holiday') };

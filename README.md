@@ -122,3 +122,8 @@ Then go to **Pakej & Harga** and set the trial length and the prices.
 
 ## Demo Data
 Admin → Settings → **Demo Data** → "Isi Data Demo". It fills the company with 8 workers, 30 days of attendance, shifts, leave, OT, claims, advances, tasks, announcements with a poll, and HR files. Two workers get real logins (the IDs shown on screen, PIN `123456`). "Padam Data Demo" removes only the demo data.
+
+## Automatic Break & OT + Staff Calendar
+- **Automatic break**: Settings → Work Hours → "Rehat automatik" + break time (e.g. 13:00–14:00). It is deducted from every worker without them punching a break. Each shift template can have its own break time. When this is on, the "Mula Rehat" button is hidden.
+- **Automatic OT**: when a worker clocks out after shift end, or comes back to work at night, the OT hours (after the minimum and rounding) are sent automatically to **Approvals** marked **AUTO**. The boss can approve, change the hours, or reject — and a rejection requires a reason. Rest days and public holidays: all hours count as OT.
+- **Staff calendar**: the Rekod tab shows a monthly calendar (present / late / leave / absent / rest). Workers can tap any day to add a note of where they are going (optional). The boss sees it in the weekly roster and on the dashboard.

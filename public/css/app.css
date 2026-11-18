@@ -271,3 +271,17 @@ td .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;cursor:poin
   table{font-size:10px}
   th,td{padding:4px 6px;border:1px solid #999;color:#000;background:#fff}
 }
+
+/* ---------- Kalendar pekerja ---------- */
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;margin-top:.4rem}
+.cal-h{font-size:11px;color:var(--muted);text-align:center;font-weight:700;text-transform:uppercase;padding-bottom:2px}
+.cal-d{position:relative;aspect-ratio:1;border:1px solid var(--line);border-radius:10px;background:var(--card2);color:var(--ink);font:700 14px var(--f);cursor:pointer;display:grid;place-items:center}
+.cal-d i{position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--gold)}
+.cal-ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.cal-late{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.cal-leave,.cal-hol{background:var(--info-soft);color:var(--info);border-color:transparent}
+.cal-abs{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.cal-off{background:transparent;color:var(--muted)}
+.cal-f{background:transparent}
+.cal-today{box-shadow:0 0 0 2px var(--gold) inset}
+.cal-k{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}

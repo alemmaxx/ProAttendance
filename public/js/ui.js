@@ -132,20 +132,38 @@ export function addDays(str, n) { const d = new Date(str + 'T00:00:00'); d.setDa
 
 // ---------- Ringkasan kehadiran sehari ----------
 // recs: rekod seorang pekerja pada satu tarikh (type in/out/break_in/break_out, ts)
+// Masa "HH:MM" pada tarikh → ms (jika end < start, end ialah hari berikutnya)
+export function windowMs(dateStr, start, end) {
+  if (!dateStr || !start || !end) return null;
+  const at = (hm) => { const [h, m] = hm.split(':').map(Number); const d = new Date(dateStr + 'T00:00:00'); d.setHours(h, m, 0, 0); return d.getTime(); };
+  let s = at(start), e = at(end);
+  if (e <= s) e += 86400000;
+  return [s, e];
+}
+const overlap = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+
+// settings: { workStart, grace, breakStart, breakEnd, autoBreak }
 export function summarizeDay(recs, settings = {}, dateStr) {
   // Punch luar talian guna masa peranti (clientTs) kerana masa server ialah masa ia dihantar
   const list = [...recs].map(r => ({ ...r, _t: (r.offline && r.clientTs ? r.clientTs : toDate(r.ts)?.getTime()) || 0 }))
     .filter(r => r.type !== 'visit').sort((a, b) => a._t - b._t);
-  let firstIn = null, lastOut = null, work = 0, brk = 0, inAt = null, brAt = null, onBreak = false;
+  let firstIn = null, lastOut = null, brk = 0, inAt = null, brAt = null, onBreak = false, manualBreak = false;
+  const intervals = [];
   for (const r of list) {
     if (r.type === 'in') { if (!firstIn) firstIn = r._t; inAt = r._t; }
-    else if (r.type === 'out') { if (inAt) { work += r._t - inAt; inAt = null; } if (brAt) { brk += r._t - brAt; brAt = null; } lastOut = r._t; onBreak = false; }
-    else if (r.type === 'break_in') { brAt = r._t; onBreak = true; }
+    else if (r.type === 'out') { if (inAt) { intervals.push([inAt, r._t]); inAt = null; } if (brAt) { brk += r._t - brAt; brAt = null; } lastOut = r._t; onBreak = false; }
+    else if (r.type === 'break_in') { brAt = r._t; onBreak = true; manualBreak = true; }
     else if (r.type === 'break_out') { if (brAt) { brk += r._t - brAt; brAt = null; } onBreak = false; }
   }
   const isToday = dateStr === todayStr();
-  if (inAt && isToday) { work += Date.now() - inAt; if (brAt) brk += Date.now() - brAt; }
-  const workMin = Math.max(0, (work - brk) / 60000);
+  const open = !!inAt;
+  if (inAt && isToday) { intervals.push([inAt, Date.now()]); if (brAt) brk += Date.now() - brAt; }
+  // Rehat automatik: tolak masa rehat tetap jika pekerja tidak punch rehat
+  let autoBrk = 0;
+  const bw = settings.autoBreak ? windowMs(dateStr, settings.breakStart, settings.breakEnd) : null;
+  if (bw && !manualBreak) intervals.forEach(([a, b]) => { autoBrk += overlap(a, b, bw[0], bw[1]); });
+  const work = intervals.reduce((t, [a, b]) => t + (b - a), 0);
+  const workMin = Math.max(0, (work - brk - autoBrk) / 60000);
   let lateMin = 0;
   if (firstIn && settings.workStart && dateStr) {
     const [h, m] = settings.workStart.split(':').map(Number);
@@ -157,8 +175,9 @@ export function summarizeDay(recs, settings = {}, dateStr) {
   return {
     firstIn: firstIn ? new Date(firstIn) : null,
     lastOut: lastOut ? new Date(lastOut) : null,
-    workMin, breakMin: brk / 60000, lateMin, onBreak,
-    open: !!inAt, lastType: last ? last.type : null, count: list.length,
+    workMin, breakMin: (brk + autoBrk) / 60000, autoBreak: autoBrk > 0, lateMin, onBreak,
+    open, lastType: last ? last.type : null, count: list.length, intervals,
+    breakWin: bw && !manualBreak ? bw : null,
     locName: (list.find(r => r.type === 'in') || {}).locName || ''
   };
 }

@@ -189,6 +189,16 @@ service cloud.firestore {
         allow delete: if isFullAdmin(cid);
       }
 
+      // Catatan harian pekerja ("pergi mana hari ini")
+      match /plans/{pid} {
+        allow read: if isAdminOf(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create, update: if isWorkerOf(cid) && request.resource.data.uid == request.auth.uid
+          && pid == request.resource.data.workerId + '_' + request.resource.data.date
+          && workerDoc(cid, request.resource.data.workerId).uid == request.auth.uid;
+        allow create: if isFullAdmin(cid) && request.resource.data.demo == true;
+        allow delete: if isFullAdmin(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+      }
+
       // Tugasan harian
       match /tasks/{tid} {
         allow read: if isAdminOf(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);

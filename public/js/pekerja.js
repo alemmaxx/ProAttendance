@@ -4,7 +4,7 @@ import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  doc, getDoc, getDocs, updateDoc, addDoc, setDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
+  doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
@@ -13,7 +13,7 @@ import {
 } from './ui.js';
 import {
   leaveTypes, leaveTypeName, resolveDay, lateSettings, shiftLabel, loadRoster, countLeaveDays, leaveBalances,
-  leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween
+  leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween, submitAutoOT
 } from './sched.js';
 import { payslipHtml, openPrint, periodLabel } from './payroll.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
@@ -210,11 +210,13 @@ async function loadToday() {
 
 async function loadMeta() {
   const t = todayStr();
-  const [ro, rq] = await Promise.all([
+  const [ro, rq, pl] = await Promise.all([
     loadRoster(db, S.cid, addDays(t, -1), addDays(t, 60)).catch(() => ({})),
-    getDocs(query(collection(db, 'companies', S.cid, 'requests'), where('uid', '==', S.user.uid))).catch(() => null)
+    getDocs(query(collection(db, 'companies', S.cid, 'requests'), where('uid', '==', S.user.uid))).catch(() => null),
+    getDocs(query(collection(db, 'companies', S.cid, 'plans'), where('uid', '==', S.user.uid))).catch(() => null)
   ]);
   S.roster = ro;
+  S.plans = {}; (pl ? pl.docs : []).forEach(d => { const x = d.data(); S.plans[x.date] = x.note; });
   S.reqs = rq ? rq.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }))
     .sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0)) : [];
 }
@@ -261,7 +263,7 @@ function nextActions() {
   const lt = sum.lastType;
   if (!lt || lt === 'out') return { main: 'in', alt: [], sum };
   if (lt === 'break_in') return { main: 'break_out', alt: [], sum };
-  return { main: 'out', alt: ['break_in'], sum };
+  return { main: 'out', alt: S.company.settings?.autoBreak ? [] : ['break_in'], sum };
 }
 
 function myLocation() {
@@ -322,6 +324,7 @@ function viewHome() {
   tick(); S.clockT = setInterval(tick, 1000);
   $('#mainBtn').onclick = (e) => punch(main, e.currentTarget);
   $('#visitBtn') && ($('#visitBtn').onclick = visitForm);
+  $$('[data-plan]').forEach(r => r.onclick = () => planNote(r.dataset.plan));
   loadTasks();
   $$('[data-alt]').forEach(b => b.onclick = (e) => punch(b.dataset.alt, e.currentTarget));
 }
@@ -331,15 +334,16 @@ function upcomingHtml() {
   const t = todayStr();
   const lv = leaveDateMap(S.reqs);
   const rows = [];
-  for (let i = 1; i <= 7; i++) {
+  for (let i = 0; i <= 7; i++) {
     const d = addDays(t, i), info = dayInfo(d), dt = new Date(d + 'T00:00:00');
     const lbl = lv[d] ? `<span class="badge b-info">${L('Cuti', 'Leave')}</span>`
       : info.type === 'off' ? `<span class="badge">${L('Rehat', 'Rest')}</span>`
       : info.type === 'holiday' && !info.shift ? `<span class="badge b-info">${esc(info.holiday)}</span>`
       : `<span class="badge b-brand">${esc(shiftLabel(info.shift))}</span>`;
-    rows.push(`<div class="set-row"><span>${dayName(dt.getDay())}, ${fmtDate(d, { day: 'numeric', month: 'short' })}</span>${lbl}</div>`);
+    rows.push(`<div class="set-row" data-plan="${d}" style="cursor:pointer"><div><b>${i === 0 ? L('Hari ini', 'Today') : dayName(dt.getDay())}</b>, ${fmtDate(d, { day: 'numeric', month: 'short' })}
+      <div class="xs" style="color:${S.plans?.[d] ? 'var(--gold)' : 'var(--muted)'}">${S.plans?.[d] ? '📍 ' + esc(S.plans[d]) : '+ ' + L('Ke mana hari ini?', 'Where to?')}</div></div>${lbl}</div>`);
   }
-  return `<div class="card"><h3>${L('Jadual 7 hari', '7-day schedule')}</h3>${rows.join('')}</div>`;
+  return `<div class="card"><h3>${L('Jadual & catatan', 'Schedule & notes')}</h3>${rows.join('')}</div>`;
 }
 
 function pickLocation(pos) {
@@ -411,11 +415,20 @@ async function punch(type, btn) {
       lat: pos?.lat ?? null, lng: pos?.lng ?? null, acc: pos?.acc ?? null, dist,
       selfie: null, hasSelfie: !!selfie, deviceId: getDeviceId(), dept: S.worker.dept || ''
     };
+    const before = [...S.today];
     await savePunch(rec, selfie);
     if (navigator.vibrate) navigator.vibrate(120);
     toast(`${TYPE_LABEL[type]()} ✓ ${fmtTime(new Date())}${rec.offline ? ' · ' + L('disimpan, akan dihantar bila ada internet', 'saved, will sync when online') : ''}`, rec.offline ? 'warn' : 'ok', rec.offline ? 6000 : 3200);
     if (rec.offline) { S.today.push({ ...rec, id: 'local' + Date.now() }); S.today.sort(sortTs); }
     else await loadToday();
+    // OT automatik selepas punch keluar
+    if (type === 'out') {
+      try {
+        const h = await submitAutoOT(db, S.cid, S.company, S.worker, S.user.uid, rec.date,
+          [...before.filter(r => r.date === rec.date), { ...rec, ts: new Date() }], S.roster[rec.date]?.[wid()], S.reqs);
+        if (h) { toast(L(`OT ${h} jam dihantar untuk kelulusan majikan.`, `OT of ${h} hrs sent for employer approval.`), 'ok', 5000); await loadMeta(); }
+      } catch (e) { console.warn('autoOT', e); }
+    }
     if (S.tab === 'home') viewHome();
   } catch (e) {
     console.error(e);
@@ -517,6 +530,46 @@ function taskDone(task) {
   };
 }
 
+// Catatan "pergi mana" untuk satu tarikh (pilihan)
+function planNote(date, after) {
+  const cur = S.plans?.[date] || '';
+  modal({
+    title: `📍 ${fmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}`,
+    body: `<p class="small muted">${L('Catat ke mana anda pergi / bekerja pada hari ini (pilihan). Majikan boleh lihat.', 'Note where you will go / work on this day (optional). Your employer can see it.')}</p>
+      <div class="field"><input class="input" id="pn" maxlength="120" value="${esc(cur)}" placeholder="${L('cth: Tapak projek Cyberjaya', 'e.g. Cyberjaya project site')}"></div>`,
+    actions: [
+      ...(cur ? [{ label: L('Padam', 'Delete'), cls: 'btn-danger', onClick: async () => {
+        try { await deleteDoc(doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${date}`)); delete S.plans[date]; (after || refreshPlanViews)(); }
+        catch (e) { toast(authErr(e), 'bad'); return false; } } }] : []),
+      { label: L('Batal', 'Cancel') },
+      { label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
+        const note = $('#pn', el).value.trim();
+        if (!note) { toast(L('Sila isi catatan.', 'Please enter a note.'), 'warn'); return false; }
+        try {
+          await setDoc(doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${date}`), { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date, note, at: serverTimestamp() });
+          S.plans[date] = note; (after || refreshPlanViews)();
+        } catch (e) { toast(authErr(e), 'bad'); return false; }
+      } }
+    ]
+  });
+}
+function dayDetail(d, recs, inf, lvReq, holName) {
+  const sm = recs ? summarizeDay(recs, lateSettings(S.company, inf), d) : null;
+  const row = (k, v) => v ? `<div class="set-row"><span class="muted small">${k}</span><b>${v}</b></div>` : '';
+  modal({
+    title: fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+    body: `${row(L('Syif', 'Shift'), inf.shift ? esc(shiftLabel(inf.shift)) : (inf.type === 'off' ? L('Hari rehat', 'Rest day') : ''))}
+      ${row(L('Cuti umum', 'Public holiday'), holName ? esc(holName) : '')}
+      ${row(L('Cuti', 'Leave'), lvReq ? esc(lvReq.typeName || '') : '')}
+      ${sm ? row(L('Masuk', 'In'), fmtTime(sm.firstIn)) + row(L('Keluar', 'Out'), sm.open ? L('masih bekerja', 'still working') : fmtTime(sm.lastOut))
+        + row(L('Jam kerja', 'Hours'), minsToHM(sm.workMin)) + row(L('Rehat', 'Break'), sm.breakMin >= 1 ? Math.round(sm.breakMin) + 'm' + (sm.autoBreak ? ' (auto)' : '') : '')
+        + row(L('Lewat', 'Late'), sm.lateMin ? sm.lateMin + 'm' : '') : ''}
+      <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b>${esc(S.plans?.[d] || '-')}</b></div>`,
+    actions: [{ label: L('Tutup', 'Close') }, { label: '📍 ' + (S.plans?.[d] ? L('Ubah catatan', 'Edit note') : L('Tambah catatan', 'Add note')), cls: 'btn-primary', onClick: () => { setTimeout(() => planNote(d), 50); } }]
+  });
+}
+function refreshPlanViews() { if (S.tab === 'home') viewHome(); else if (S.tab === 'rekod') viewRekod(); }
+
 // ---------------------------------------------------------------- REKOD
 async function viewRekod() {
   const v = $('#view');
@@ -548,7 +601,28 @@ async function viewRekod() {
     const present = sums.filter(x => x.s?.firstIn).length;
     const totalMin = sums.reduce((a, x) => a + (x.s?.workMin || 0), 0);
     const lateDays = sums.filter(x => x.s?.lateMin > 0).length;
-    $('#rekBody').innerHTML = `
+    // Kalendar bulan
+    const [yy, mm] = ym.split('-').map(Number);
+    const last = new Date(yy, mm, 0).getDate(), first = (new Date(yy, mm - 1, 1).getDay() + 6) % 7;
+    const sumOf = Object.fromEntries(sums.map(x => [x.dt, x.s]));
+    const cells = [];
+    for (let i = 0; i < first; i++) cells.push('<div></div>');
+    for (let dd = 1; dd <= last; dd++) {
+      const d = `${ym}-${String(dd).padStart(2, '0')}`, inf = info(d), sm = sumOf[d] || (byDate[d] ? summarizeDay(byDate[d], lateSettings(S.company, inf), d) : null);
+      let cls = 'cal-f';
+      if (sm?.firstIn) cls = sm.lateMin ? 'cal-late' : 'cal-ok';
+      else if (lv[d]) cls = 'cal-leave';
+      else if (hol[d] || inf.type === 'holiday') cls = 'cal-hol';
+      else if (inf.type === 'off') cls = 'cal-off';
+      else if (d < t) cls = 'cal-abs';
+      cells.push(`<button class="cal-d ${cls} ${d === t ? 'cal-today' : ''}" data-cd="${d}">${dd}${S.plans?.[d] ? '<i></i>' : ''}</button>`);
+    }
+    const calHtml = `<div class="cal">${['Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab', 'Ahd'].map((x, i) => `<div class="cal-h">${dayName((i + 1) % 7)}</div>`).join('')}${cells.join('')}</div>
+      <div class="row xs muted" style="margin:.5rem 0 1rem;gap:.8rem">
+        <span><b class="cal-k cal-ok"></b>${L('Hadir', 'Present')}</span><span><b class="cal-k cal-late"></b>${L('Lewat', 'Late')}</span>
+        <span><b class="cal-k cal-leave"></b>${L('Cuti', 'Leave')}</span><span><b class="cal-k cal-abs"></b>${L('Tidak hadir', 'Absent')}</span>
+        <span><b class="cal-k cal-off"></b>${L('Rehat', 'Off')}</span><span>📍 ${L('ada catatan', 'has note')}</span></div>`;
+    $('#rekBody').innerHTML = calHtml + `
       <div class="stats">
         <div class="stat ok"><div class="n">${present}</div><div class="t">${L('Hari hadir', 'Days present')}</div></div>
         <div class="stat warn"><div class="n">${lateDays}</div><div class="t">${L('Hari lewat', 'Late days')}</div></div>
@@ -574,6 +648,7 @@ async function viewRekod() {
           ${right}
         </div>`;
       }).join('') : `<div class="empty">${L('Tiada rekod untuk bulan ini.', 'No records this month.')}</div>`}`;
+    $$('[data-cd]').forEach(b => b.onclick = () => dayDetail(b.dataset.cd, byDate[b.dataset.cd], info(b.dataset.cd), lv[b.dataset.cd], hol[b.dataset.cd]));
   } catch (e) {
     console.error(e);
     $('#rekBody').innerHTML = `<div class="empty">${L('Gagal memuatkan rekod.', 'Failed to load records.')}<br><span class="xs">${esc(e.message)}</span></div>`;

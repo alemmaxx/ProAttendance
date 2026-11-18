@@ -1178,6 +1178,19 @@ function viewSettings() {
     </div>
     <label class="lbl">${L('Hari bekerja', 'Work days')}</label>
     <div class="row" style="margin-bottom:1rem">${[1, 2, 3, 4, 5, 6, 0].map(d => `<label class="check"><input type="checkbox" data-wd="${d}" ${wd.includes(d) ? 'checked' : ''}>${dayName(d)}</label>`).join('')}</div>
+    <h3 style="margin-top:.6rem">${L('Rehat & OT Automatik', 'Automatic Break & OT')}</h3>
+    <div class="set-row"><div><b>${L('Rehat automatik', 'Automatic break')}</b><div class="small muted">${L('Masa rehat ditolak sendiri untuk semua pekerja — tidak perlu punch rehat. Syif boleh ada masa rehat sendiri.', 'Break time is deducted automatically for all staff — no break punch needed. Shifts can have their own break time.')}</div></div>
+      <label class="switch"><input type="checkbox" id="tABrk" ${st.autoBreak ? 'checked' : ''}><span></span></label></div>
+    <div class="grid2" style="margin-top:.4rem">
+      <div class="field"><label class="lbl">${L('Rehat mula', 'Break from')}</label><input class="input" type="time" id="wBs" value="${esc(st.breakStart || '13:00')}"></div>
+      <div class="field"><label class="lbl">${L('Rehat tamat', 'Break until')}</label><input class="input" type="time" id="wBe" value="${esc(st.breakEnd || '14:00')}"></div>
+    </div>
+    <div class="set-row"><div><b>${L('OT automatik', 'Automatic OT')}</b><div class="small muted">${L('Bila pekerja keluar lewat dari tamat syif, atau masuk semula (cth: waktu malam), jam OT dikira dan dihantar ke Kelulusan. Hari rehat / cuti umum: semua jam dikira OT.', 'When staff clock out after shift end, or come back (e.g. at night), OT hours are calculated and sent to Approvals. Rest days / public holidays: all hours count as OT.')}</div></div>
+      <label class="switch"><input type="checkbox" id="tAOT" ${st.autoOT ? 'checked' : ''}><span></span></label></div>
+    <div class="grid2" style="margin-top:.4rem">
+      <div class="field"><label class="lbl">${L('OT minimum (minit)', 'Minimum OT (minutes)')}</label><input class="input" type="number" min="0" id="wOm" value="${st.otMin ?? 30}"></div>
+      <div class="field"><label class="lbl">${L('Bundar ke bawah setiap (minit)', 'Round down to every (minutes)')}</label><input class="input" type="number" min="1" id="wOr" value="${st.otRound ?? 15}"></div>
+    </div>
     <h3 style="margin-top:.6rem">${L('Tetapan Clock-in', 'Clock-in Settings')}</h3>
     <div class="set-row"><div><b>${L('Selfie wajib semasa punch', 'Selfie required when punching')}</b><div class="small muted">${L('Gambar disimpan sebagai bukti (tanpa pengecaman wajah).', 'Photo kept as proof (no face recognition).')}</div></div>
       <label class="switch"><input type="checkbox" id="tSelfie" ${st.selfie !== false ? 'checked' : ''}><span></span></label></div>
@@ -1300,6 +1313,8 @@ function viewSettings() {
       await updateDoc(cRef(), {
         'settings.workStart': $('#wS').value || '09:00', 'settings.workEnd': $('#wE').value || '18:00',
         'settings.grace': Number($('#wG').value || 0),
+        'settings.autoBreak': $('#tABrk').checked, 'settings.breakStart': $('#wBs').value || '', 'settings.breakEnd': $('#wBe').value || '',
+        'settings.autoOT': $('#tAOT').checked, 'settings.otMin': Number($('#wOm').value || 0), 'settings.otRound': Math.max(1, Number($('#wOr').value || 15)),
         'settings.workDays': $$('[data-wd]').filter(x => x.checked).map(x => Number(x.dataset.wd)),
         'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked
       });
@@ -1470,10 +1485,12 @@ function viewRoster() {
 }
 
 function shiftRow(sh = {}) {
-  return `<div class="dyn-row" data-row="shift" data-id="${esc(sh.id || '')}" style="grid-template-columns:2fr 1fr 1fr 1fr auto">
+  return `<div class="dyn-row" data-row="shift" data-id="${esc(sh.id || '')}" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr .8fr auto">
     <input class="input" data-k="name" placeholder="${L('Nama syif (cth: Pagi)', 'Shift name (e.g. Morning)')}" value="${esc(sh.name || '')}">
     <input class="input" data-k="start" type="time" value="${esc(sh.start || '08:00')}" title="${L('Masuk', 'Start')}">
     <input class="input" data-k="end" type="time" value="${esc(sh.end || '17:00')}" title="${L('Keluar', 'End')}">
+    <input class="input" data-k="bStart" type="time" value="${esc(sh.bStart || '')}" title="${L('Rehat mula', 'Break from')}">
+    <input class="input" data-k="bEnd" type="time" value="${esc(sh.bEnd || '')}" title="${L('Rehat tamat', 'Break until')}">
     <input class="input" data-k="grace" type="number" min="0" max="120" value="${sh.grace ?? (S.company.settings?.grace ?? 10)}" title="${L('Tenggang lewat (minit)', 'Late grace (min)')}">
     <button type="button" class="icon-btn" data-del>✕</button>
   </div>`;
@@ -1484,7 +1501,7 @@ function drawShiftTpl() {
   box.innerHTML = `
   <div class="card">
     <h3>${L('Templat Syif', 'Shift Templates')}</h3>
-    <p class="small muted">${L('Contoh: Pagi 07:00–15:00, Petang 15:00–23:00, Malam 23:00–07:00. Lajur: nama · masuk · keluar · tenggang lewat (minit).', 'E.g. Morning 07:00–15:00, Evening 15:00–23:00, Night 23:00–07:00. Columns: name · start · end · late grace (min).')}</p>
+    <p class="small muted">${L('Contoh: Pagi 07:00–15:00, Petang 15:00–23:00, Malam 23:00–07:00. Lajur: nama · masuk · keluar · rehat mula · rehat tamat · tenggang lewat (minit). Rehat kosong = ikut rehat syarikat.', 'E.g. Morning 07:00–15:00, Evening 15:00–23:00, Night 23:00–07:00. Columns: name · start · end · break from · break until · late grace (min).')}</p>
     <div id="shBox">${(S.company.shiftTemplates || []).map(shiftRow).join('')}</div>
     <div class="row">
       <button class="btn btn-sm btn-plus" id="shAdd">${icon('plus', 16)} ${L('Tambah Syif', 'Add Shift')}</button>
@@ -1497,7 +1514,8 @@ function drawShiftTpl() {
     const rows = $$('[data-row="shift"]', shBox).map(r => ({
       id: r.dataset.id || ('s' + Math.random().toString(36).slice(2, 8)),
       name: $('[data-k="name"]', r).value.trim(), start: $('[data-k="start"]', r).value, end: $('[data-k="end"]', r).value,
-      grace: Number($('[data-k="grace"]', r).value || 0)
+      grace: Number($('[data-k="grace"]', r).value || 0),
+      bStart: $('[data-k="bStart"]', r).value || '', bEnd: $('[data-k="bEnd"]', r).value || ''
     })).filter(x => x.name && x.start && x.end);
     busy(e.currentTarget, true);
     try { await updateDoc(cRef(), { shiftTemplates: rows }); toast(L('Templat syif disimpan.', 'Shift templates saved.')); }
@@ -1534,10 +1552,12 @@ async function drawWeek() {
   $('#wkPrev').onclick = () => { S.weekFrom = addDays(from, -7); drawWeek(); };
   $('#wkNext').onclick = () => { S.weekFrom = addDays(from, 7); drawWeek(); };
   $('#wkToday').onclick = () => { S.weekFrom = weekStart(); drawWeek(); };
-  const [roster, rq] = await Promise.all([
+  const [roster, rq, pl] = await Promise.all([
     loadRoster(db, S.cid, from, to).catch(() => ({})),
-    getDocs(query(sub('requests'), where('status', '==', 'approved'))).catch(() => null)
+    getDocs(query(sub('requests'), where('status', '==', 'approved'))).catch(() => null),
+    getDocs(query(sub('plans'), where('date', '>=', from), where('date', '<=', to))).catch(() => null)
   ]);
+  const notes = {}; (pl ? pl.docs : []).forEach(d => { const x = d.data(); notes[x.workerId + '|' + x.date] = x.note; });
   const lv = {};
   (rq ? rq.docs.map(d => d.data()) : []).filter(r => r.kind === 'leave' && r.from <= to && (r.to || r.from) >= from)
     .forEach(r => dateRange(r.from, r.to || r.from).forEach(d => { (lv[r.workerId] = lv[r.workerId] || {})[d] = r; }));
@@ -1562,6 +1582,7 @@ async function drawWeek() {
             <option value="off" ${val === 'off' ? 'selected' : ''}>${L('Rehat', 'Rest')}</option>
           </select>
           ${leave ? `<div class="badge b-info" style="margin-top:2px">${L('Cuti', 'Leave')}</div>` : ''}
+          ${notes[w.id + '|' + d] ? `<div class="xs" style="color:var(--gold);margin-top:2px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(notes[w.id + '|' + d])}">📍 ${esc(notes[w.id + '|' + d])}</div>` : ''}
         </td>`;
       }).join('')}</tr>`).join('')}</tbody></table></div>`;
   $$('[data-cell]').forEach(sel => sel.onchange = async () => {
@@ -1645,7 +1666,7 @@ async function drawApprovals() {
         if (b && (b.ent + b.carry) > 0) extra = `<span class="badge ${b.left >= r.days ? 'b-ok' : 'b-bad'}">${L('Baki semasa', 'Current balance')}: ${b.left}</span>`;
       }
     } else if (r.kind === 'ot') {
-      detail = `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · <b>${r.approvedHours ?? r.hours}</b> ${L('jam', 'hrs')} · ${OT_LABEL[otKind(resolveDay(S.company, w, r.date))]()}`;
+      detail = `${r.auto ? '<span class="badge b-info">AUTO</span> ' : ''}${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · <b>${r.approvedHours ?? r.hours}</b> ${L('jam', 'hrs')} · ${OT_LABEL[otKind(resolveDay(S.company, w, r.date))]()}`;
     } else if (r.kind === 'swap') {
       const o = S.workers.find(x => x.id === r.withId);
       detail = `${fmtDate(r.date)} · ${L('tukar syif dengan', 'swap shift with')} <b>${esc(r.withId)}</b> ${o ? esc(o.name) : `<span class="badge b-bad">${L('ID tidak wujud', 'ID not found')}</span>`}`;
@@ -1686,11 +1707,12 @@ function decide(r, ok) {
       ${ok && (r.kind === 'claim' || r.kind === 'advance') ? `<div class="field"><label class="lbl">${L('Amaun diluluskan (RM)', 'Approved amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="apA" value="${r.amount}"></div>
         <p class="xs muted">${r.kind === 'claim' ? L('Akan dibayar balik dalam gaji bulan berikutnya yang diproses.', 'Will be reimbursed in the next payroll run.') : L('Akan dipotong dalam gaji bulan berikutnya yang diproses.', 'Will be deducted in the next payroll run.')}</p>` : ''}
       ${ok && r.kind === 'fix' ? `<p class="small muted">${L('Rekod punch akan ditambah secara automatik:', 'A punch record will be added automatically:')} ${fmtDate(r.date)} ${esc(r.time)} · ${TYPE_LABEL[r.type]?.()}</p>` : ''}
-      <div class="field"><label class="lbl">${L('Catatan kepada pekerja (pilihan)', 'Note to staff (optional)')}</label><textarea class="input" id="apN" maxlength="300" style="min-height:60px"></textarea></div>`,
+      <div class="field"><label class="lbl">${ok ? L('Catatan kepada pekerja (pilihan)', 'Note to staff (optional)') : L('Sebab ditolak (wajib)', 'Reason for rejection (required)')}</label><textarea class="input" id="apN" maxlength="300" style="min-height:60px"></textarea></div>`,
     actions: [
       { label: L('Batal', 'Cancel') },
       {
         label: ok ? L('Lulus', 'Approve') : L('Tolak', 'Reject'), cls: ok ? 'btn-ok' : 'btn-danger', onClick: async ({ el }) => {
+          if (!ok && !$('#apN', el).value.trim()) { toast(L('Sila nyatakan sebab ditolak.', 'Please give a reason for rejection.'), 'warn'); return false; }
           try {
             const b = writeBatch(db);
             const upd = { status: ok ? 'approved' : 'rejected', decidedAt: serverTimestamp(), decidedBy: S.user.email || '', adminNote: $('#apN', el).value.trim() };
@@ -2112,8 +2134,9 @@ async function dashExtras() {
       getDocs(query(sub('attendance'), where('date', '>=', qFrom), where('date', '<=', t))),
       loadRoster(db, S.cid, t, addDays(t, 13)).catch(() => ({})),
       getDocs(query(sub('requests'), where('status', '==', 'approved'))).catch(() => null),
-      isSupervisor() ? null : getDocs(query(sub('hrfiles'), where('expiry', '<=', addDays(t, 30)))).catch(() => null)
-    ]);
+      isSupervisor() ? null : getDocs(query(sub('hrfiles'), where('expiry', '<=', addDays(t, 30)))).catch(() => null),
+      getDocs(query(sub('plans'), where('date', '==', t))).catch(() => null)
+    ]).then(r => { S.todayPlans = r[4] ? r[4].docs.map(d => d.data()) : []; return r; });
     const recs = att.docs.map(d => d.data()).filter(r => r.type !== 'visit');
     const wById = Object.fromEntries(S.workers.map(w => [w.id, w]));
     // Trend 14 hari
@@ -2176,6 +2199,7 @@ async function dashExtras() {
     const anniv = active.filter(w => (w.startDate || '').slice(5, 7) === m && w.startDate.slice(0, 4) < t.slice(0, 4));
     const exp = files ? files.docs.map(d => d.data()).filter(f => f.expiry && wById[f.workerId]).sort((a, b) => a.expiry.localeCompare(b.expiry)) : [];
     const items = [
+      ...(S.todayPlans || []).map(p => `<div class="set-row"><span>📍 ${esc(p.name)}</span><span class="small" style="color:var(--gold)">${esc(p.note)}</span></div>`),
       ...exp.map(f => `<div class="set-row"><span>📄 ${esc(f.title)} · ${esc(wById[f.workerId].name)}</span><span class="badge ${f.expiry < t ? 'b-bad' : 'b-warn'}">${f.expiry < t ? L('Tamat', 'Expired') : L('Tamat', 'Expires')} ${fmtDate(f.expiry)}</span></div>`),
       ...bdays.map(w => `<div class="set-row"><span>🎂 ${esc(w.name)}</span><span class="small">${fmtDate(w.dob, { day: 'numeric', month: 'short' })}</span></div>`),
       ...anniv.map(w => `<div class="set-row"><span>🎉 ${esc(w.name)}</span><span class="small">${Number(t.slice(0, 4)) - Number(w.startDate.slice(0, 4))} ${L('tahun berkhidmat', 'years of service')}</span></div>`)
@@ -2483,7 +2507,7 @@ async function drawEA() {
 
 
 // ================================================================ DATA DEMO
-const DEMO_COLS = ['attendance', 'requests', 'tasks', 'announcements', 'hrfiles', 'hr', 'workers'];
+const DEMO_COLS = ['attendance', 'requests', 'tasks', 'announcements', 'hrfiles', 'hr', 'plans', 'workers'];
 
 async function seedDemo(btn) {
   if (S.workers.some(w => w.demo)) return toast(L('Data demo sudah ada. Padam dahulu jika mahu isi semula.', 'Demo data already exists. Delete it first to refill.'), 'warn', 5000);
@@ -2498,8 +2522,8 @@ async function seedDemo(btn) {
 
     // 1) Tetapan syarikat
     const shiftTemplates = [
-      { id: 'sPagi', name: L('Pagi', 'Morning'), start: '08:00', end: '17:00', grace: 10 },
-      { id: 'sPetang', name: L('Petang', 'Evening'), start: '14:00', end: '23:00', grace: 10 }
+      { id: 'sPagi', name: L('Pagi', 'Morning'), start: '08:00', end: '17:00', grace: 10, bStart: '12:30', bEnd: '13:30' },
+      { id: 'sPetang', name: L('Petang', 'Evening'), start: '14:00', end: '23:00', grace: 10, bStart: '18:30', bEnd: '19:30' }
     ];
     const holidays = [...(c.holidays || []), ...fixedNationalHolidays(Number(yr))].filter((h, i, a) => a.findIndex(x => x.date === h.date) === i);
     await updateDoc(cRef(), {
@@ -2512,7 +2536,8 @@ async function seedDemo(btn) {
         { name: L('Elaun Tetap', 'Fixed Allowance'), amount: 150, type: 'monthly', epf: true, socso: true }
       ],
       payroll: { ...(c.payroll || {}), epfEe: 11, epfEr: 13, socsoEe: 0.5, socsoEr: 1.75, eisEe: 0.2, eisEr: 0.2, workDaysPerMonth: 26, hoursPerDay: 8, perfectBonus: 50, lateMode: 'perMin', lateAmount: 0.2, deductUnpaid: true, deductAbsent: false },
-      'settings.visits': true
+      'settings.visits': true, 'settings.autoBreak': true, 'settings.breakStart': '13:00', 'settings.breakEnd': '14:00',
+      'settings.autoOT': true, 'settings.otMin': 30, 'settings.otRound': 15
     });
     const sh = (await getDoc(cRef())).data().shiftTemplates || shiftTemplates;
 
@@ -2604,6 +2629,12 @@ async function seedDemo(btn) {
     R(workers[3], { kind: 'advance', date: addDays(t, -5), amount: 200, approvedAmount: 200, reason: L('Kecemasan', 'Emergency'), status: 'approved' });
     R(workers[5], { kind: 'fix', date: addDays(t, -1), time: '18:05', type: 'out', reason: L('Terlupa punch keluar', 'Forgot to clock out'), status: 'pending' });
     R(workers[6], { kind: 'swap', date: addDays(t, 2), withId: workers[7].id, reason: L('Urusan peribadi', 'Personal matters'), status: 'pending' });
+
+    // Catatan "pergi mana"
+    [[workers[4], t, L('Tapak pelanggan Puchong', 'Client site Puchong')], [workers[0], addDays(t, 1), L('Mesyuarat pembekal, Shah Alam', 'Supplier meeting, Shah Alam')], [workers[1], addDays(t, 2), L('Bank & LHDN', 'Bank & LHDN')]]
+      .forEach(([w, d, note]) => ops.push(b => b.set(doc(db, 'companies', S.cid, 'plans', `${w.id}_${d}`), { uid: uidOf(w), workerId: w.id, name: w.name, date: d, note, at: serverTimestamp(), demo: true })));
+    // OT automatik (contoh: keluar lewat semalam)
+    R(workers[1], { kind: 'ot', auto: true, date: addDays(t, -1), start: '18:00', end: '19:45', hours: 1.75, otKind: 'normal', reason: L('Auto: bekerja selepas tamat syif', 'Auto: worked after shift end'), status: 'pending' });
 
     // 7) Tugasan, pengumuman, fail HR
     [[workers[0], L('Semak stok gudang', 'Check warehouse stock'), 'done'], [workers[2], L('Sediakan menu katering Sabtu', "Prepare Saturday's catering menu"), 'open'], [workers[4], L('Servis mesin pendingin', 'Service the chiller'), 'open']]

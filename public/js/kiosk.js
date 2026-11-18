@@ -6,6 +6,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from
 import {
   getFirestore, doc, getDoc, getDocs, collection, query, where, writeBatch, serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { submitAutoOT, loadRoster } from './sched.js';
 import {
   $, $$, L, esc, toast, modal, langBtn, applyLang, todayStr, addDays, fmtTime, toDate, summarizeDay, TYPE_LABEL,
   applyBrand, logoHtml, takeSelfie, scanQR, authErr, icon, getDeviceId, isExpired, fmtDate, punchTime
@@ -154,7 +155,7 @@ async function doPunch(c, id, pin) {
     const sessionDate = !tR.length && yOpen ? y : t;
     const cur = sessionDate === t ? tR : yR;
     const lt = summarizeDay(cur, {}, sessionDate).lastType;
-    const acts = !lt || lt === 'out' ? ['in'] : lt === 'break_in' ? ['break_out'] : ['out', 'break_in'];
+    const acts = !lt || lt === 'out' ? ['in'] : lt === 'break_in' ? ['break_out'] : (co.settings?.autoBreak ? ['out'] : ['out', 'break_in']);
     wait.close();
     const choice = await new Promise(res => {
       let done = false;
@@ -184,7 +185,19 @@ async function doPunch(c, id, pin) {
     });
     if (selfie) b.set(doc(kDb, 'companies', c.cid, 'selfies', ref.id), { uid, workerId: me.workerId, selfie, at: serverTimestamp() });
     await b.commit();
-    modal({ title: '✓', body: `<div class="center"><h2>${TYPE_LABEL[choice]()}</h2><p class="big-time" style="font-size:2.4rem">${fmtTime(new Date())}</p><p>${esc(w.name)}</p></div>` });
+    // OT automatik selepas keluar
+    let otH = 0;
+    if (choice === 'out' && co.settings?.autoOT) {
+      try {
+        const [rq, ro] = await Promise.all([
+          getDocs(query(collection(kDb, 'companies', c.cid, 'requests'), where('uid', '==', uid))),
+          loadRoster(kDb, c.cid, sessionDate, sessionDate).catch(() => ({}))
+        ]);
+        otH = await submitAutoOT(kDb, c.cid, co, { ...w, id: me.workerId }, uid, sessionDate,
+          [...cur, { type: 'out', ts: new Date(), date: sessionDate }], ro[sessionDate]?.[me.workerId], rq.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.warn('autoOT', e); }
+    }
+    modal({ title: '✓', body: `<div class="center"><h2>${TYPE_LABEL[choice]()}</h2><p class="big-time" style="font-size:2.4rem">${fmtTime(new Date())}</p><p>${esc(w.name)}</p>${otH ? `<p class="badge b-brand">OT ${otH} ${L('jam — menunggu kelulusan', 'hrs — pending approval')}</p>` : ''}</div>` });
     setTimeout(() => $$('.modal-bg').forEach(x => x.remove()), 3000);
   } catch (e) {
     wait.close();
