@@ -119,3 +119,6 @@ Then go to **Pakej & Harga** and set the trial length and the prices.
 ## Notes for the first deploy after F4–F6
 - The first deploy of the new functions (notification triggers) can sometimes fail with a "permission propagating" error. Wait 2–3 minutes, then press deploy.bat again.
 - From F4 onwards, selfies are stored separately (`selfies`) so that reports stay light. Old punches still show their selfies as before.
+
+## Demo Data
+Admin → Settings → **Demo Data** → "Isi Data Demo". It fills the company with 8 workers, 30 days of attendance, shifts, leave, OT, claims, advances, tasks, announcements with a poll, and HR files. Two workers get real logins (the IDs shown on screen, PIN `123456`). "Padam Data Demo" removes only the demo data.

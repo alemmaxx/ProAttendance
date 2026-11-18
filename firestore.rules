@@ -172,6 +172,8 @@ service cloud.firestore {
       match /requests/{rid} {
         allow read: if isSuper() || isAdminOf(cid)
           || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        // Data demo boleh dicipta oleh admin
+        allow create: if isFullAdmin(cid) && request.resource.data.demo == true;
         allow create: if isWorkerOf(cid)
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.status == 'pending'

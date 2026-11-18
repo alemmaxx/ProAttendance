@@ -1225,6 +1225,15 @@ function viewSettings() {
     <div id="admList"><div class="loader" style="min-height:60px"><span class="spin"></span></div></div>
   </div>` : ''}
 
+  <div class="card" style="border:2px dashed var(--brand)">
+    <h3>${L('Data Demo', 'Demo Data')}</h3>
+    <p class="small muted">${L('Isi syarikat ini dengan data contoh (8 pekerja, kehadiran 30 hari, syif, cuti, OT, tuntutan, tugasan, pengumuman, fail HR) untuk cuba semua ciri. Boleh dipadam bila-bila masa.', 'Fill this company with sample data (8 staff, 30 days of attendance, shifts, leave, OT, claims, tasks, announcements, HR files) to try every feature. Can be deleted any time.')}</p>
+    <div class="row">
+      <button class="btn btn-primary" id="demoSeed">${icon('plus', 18)} ${L('Isi Data Demo', 'Fill Demo Data')}</button>
+      <button class="btn btn-ghost" id="demoClear">${L('Padam Data Demo', 'Delete Demo Data')}</button>
+    </div>
+  </div>
+
   <div class="card">
     <h3>${L('Log Perubahan & Sandaran', 'Change Log & Backup')}</h3>
     <div class="row">
@@ -1307,6 +1316,8 @@ function viewSettings() {
   $('#cpLink').onclick = () => copyText(location.origin);
 
   $('#logBtn').onclick = showLogs;
+  $('#demoSeed').onclick = (e) => seedDemo(e.currentTarget);
+  $('#demoClear').onclick = (e) => clearDemo(e.currentTarget);
   if (!S.me.support) pushAvailable().then(ok => {
     if (!ok || !$('#pushRow')) return;
     $('#pushRow').classList.remove('hide');
@@ -2451,4 +2462,182 @@ async function drawEA() {
     $$('[data-ea]').forEach(b => b.onclick = () => openPrint(stmt([list[Number(b.dataset.ea)]])));
     $('#eaPrint').onclick = () => list.length && openPrint(stmt(list));
   } catch (e) { $('#eaOut').innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; }
+}
+
+
+// ================================================================ DATA DEMO
+const DEMO_COLS = ['attendance', 'requests', 'tasks', 'announcements', 'hrfiles', 'hr', 'workers'];
+
+async function seedDemo(btn) {
+  if (S.workers.some(w => w.demo)) return toast(L('Data demo sudah ada. Padam dahulu jika mahu isi semula.', 'Demo data already exists. Delete it first to refill.'), 'warn', 5000);
+  if (!await confirmBox(L('Isi data demo? Tetapan syif, cuti umum, jenis cuti dan kadar caruman CONTOH juga akan ditetapkan (sila semak sebelum guna sebenar).', 'Fill demo data? SAMPLE shift templates, holidays, leave types and contribution rates will also be set (review them before real use).'))) return;
+  busy(btn, true, L('Mengisi…', 'Filling…'));
+  try {
+    const c = S.company, t = todayStr(), yr = t.slice(0, 4);
+    // Generator rawak tetap (hasil sama setiap kali)
+    let seed = 7; const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+    const pick = (a) => a[Math.floor(rnd() * a.length)];
+    const at = (d, hh, mm) => Timestamp.fromDate(new Date(`${d}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`));
+
+    // 1) Tetapan syarikat
+    const shiftTemplates = [
+      { id: 'sPagi', name: L('Pagi', 'Morning'), start: '08:00', end: '17:00', grace: 10 },
+      { id: 'sPetang', name: L('Petang', 'Evening'), start: '14:00', end: '23:00', grace: 10 }
+    ];
+    const holidays = [...(c.holidays || []), ...fixedNationalHolidays(Number(yr))].filter((h, i, a) => a.findIndex(x => x.date === h.date) === i);
+    await updateDoc(cRef(), {
+      shiftTemplates: c.shiftTemplates?.length ? c.shiftTemplates : shiftTemplates,
+      holidays,
+      departments: [...new Set([...(c.departments || []), L('Operasi', 'Operations'), L('Dapur', 'Kitchen'), L('Pentadbiran', 'Admin')])],
+      leaveTypes: c.leaveTypes?.length ? c.leaveTypes : DEFAULT_LEAVE_TYPES(),
+      allowanceTemplates: c.allowanceTemplates?.length ? c.allowanceTemplates : [
+        { name: L('Elaun Makan', 'Meal Allowance'), amount: 10, type: 'daily', epf: false, socso: false },
+        { name: L('Elaun Tetap', 'Fixed Allowance'), amount: 150, type: 'monthly', epf: true, socso: true }
+      ],
+      payroll: { ...(c.payroll || {}), epfEe: 11, epfEr: 13, socsoEe: 0.5, socsoEr: 1.75, eisEe: 0.2, eisEr: 0.2, workDaysPerMonth: 26, hoursPerDay: 8, perfectBonus: 50, lateMode: 'perMin', lateAmount: 0.2, deductUnpaid: true, deductAbsent: false },
+      'settings.visits': true
+    });
+    const sh = (await getDoc(cRef())).data().shiftTemplates || shiftTemplates;
+
+    // 2) Lokasi
+    let loc = S.locations[0];
+    if (!loc) {
+      const r = await addDoc(sub('locations'), { name: L('Ibu Pejabat (Demo)', 'HQ (Demo)'), mode: 'button', radius: 150, lat: null, lng: null, qrSecret: randSecret(), createdAt: serverTimestamp(), demo: true });
+      loc = { id: r.id, name: L('Ibu Pejabat (Demo)', 'HQ (Demo)') };
+    }
+
+    // 3) Pekerja
+    const P = [
+      ['Ahmad Faiz bin Rahman', 'Penyelia Operasi', 0, 'monthly', 3200, '1990-' + t.slice(5, 7) + '-21'],
+      ['Nurul Aina binti Hassan', 'Kerani Akaun', 2, 'monthly', 2400, '1995-03-12'],
+      ['Muhammad Hakim bin Ali', 'Tukang Masak', 1, 'monthly', 2600, '1992-07-04'],
+      ['Siti Hajar binti Osman', 'Pembantu Dapur', 1, 'monthly', 1800, '1998-11-30'],
+      ['Tan Wei Ming', 'Juruteknik', 0, 'monthly', 2900, '1988-01-15'],
+      ['Kavitha a/p Raj', 'Penyambut Tetamu', 2, 'monthly', 1900, '1996-' + t.slice(5, 7) + '-08'],
+      ['Amirul Hafiz bin Zainal', 'Pekerja Am (Harian)', 0, 'daily', 80, '2000-05-19'],
+      ['Farah Nadia binti Yusof', 'Pembantu Kedai (Sambilan)', 0, 'hourly', 10, '2002-09-27']
+    ];
+    const depts = [L('Operasi', 'Operations'), L('Dapur', 'Kitchen'), L('Pentadbiran', 'Admin')];
+    const seq0 = await runTransaction(db, async tx => { const s = await tx.get(cRef()); const n = s.data().seq || 0; tx.update(cRef(), { seq: n + P.length }); return n; });
+    const workers = [];
+    for (let i = 0; i < P.length; i++) {
+      const [name, position, di, payType, salary, dob] = P[i];
+      const wid = `${c.code}${String(seq0 + i + 1).padStart(3, '0')}`;
+      let uid = '';
+      if (i < 2) { // Dua akaun sebenar untuk cuba login pekerja (PIN 123456)
+        try { const cr = await createUserWithEmailAndPassword(getSecAuth(), workerEmail(wid), '123456'); uid = cr.user.uid; await signOut(getSecAuth()).catch(() => {}); } catch {}
+      }
+      workers.push({
+        id: wid, uid, name, position, dept: depts[di], payType, salary, dob, phone: '0123456' + String(100 + i), ic: `9${i}0101-10-${String(1000 + i * 7)}`,
+        branchId: loc.id, startDate: '2025-01-06', bank: pick(['Maybank', 'CIMB', 'Bank Islam', 'RHB']), bankAcc: '1640' + String(1000000 + i * 1234),
+        epfNo: String(20000000 + i * 911), socsoNo: '', taxNo: i % 2 ? '' : 'SG' + String(1000000 + i), active: true, mustChangePin: false, deviceId: null,
+        defaultShift: i === 2 || i === 3 ? 'sPagi' : '', workDays: payType === 'hourly' ? [1, 3, 5, 6] : [],
+        allowances: payType === 'monthly' ? [{ name: L('Elaun Makan', 'Meal Allowance'), amount: 10, type: 'daily', epf: false, socso: false }, ...(i === 0 ? [{ name: L('Elaun Penyelia', 'Supervisor Allowance'), amount: 300, type: 'monthly', epf: true, socso: true }] : [])] : [],
+        deductions: i === 4 ? [{ name: L('Potongan uniform', 'Uniform deduction'), amount: 30, type: 'once' }] : [],
+        leaveEntitle: {}, leaveCarry: i === 1 ? { annual: 2 } : {}, statutory: {}, demo: true
+      });
+    }
+    const ops = [];
+    workers.forEach(w => {
+      const { id, ...data } = w;
+      ops.push(b => b.set(doc(db, 'companies', S.cid, 'workers', id), { ...data, createdAt: serverTimestamp() }));
+      if (w.uid) ops.push(b => b.set(doc(db, 'users', w.uid), { role: 'worker', cid: S.cid, workerId: id, createdAt: serverTimestamp() }));
+    });
+    ops.push(b => b.update(cRef(), { workerCount: increment(workers.length) }));
+    const uidOf = (w) => w.uid || ('demo-' + w.id);
+
+    // 4) Kehadiran 30 hari lepas + hari ini
+    const roster = {};
+    const ws = weekStart(t);
+    dateRange(ws, addDays(ws, 6)).forEach((d, i) => { if (i % 2 === 0) roster[d] = { [workers[4].id]: 'sPetang' }; if (i === 2) roster[d] = { ...(roster[d] || {}), [workers[5].id]: 'off' }; });
+    const leaveDays = new Set(dateRange(addDays(t, -9), addDays(t, -8)).map(d => workers[2].id + d));
+    for (const d of dateRange(addDays(t, -30), t)) {
+      for (const w of workers) {
+        const info = resolveDay({ ...c, shiftTemplates: sh, holidays }, w, d, roster[d]?.[w.id]);
+        if (info.type !== 'work' || leaveDays.has(w.id + d)) continue;
+        if (rnd() < 0.05 && d !== t) continue; // tidak hadir sekali-sekala
+        const [sh0, sm0] = info.shift.start.split(':').map(Number), [eh, em] = info.shift.end.split(':').map(Number);
+        const late = rnd() < 0.15 ? 12 + Math.floor(rnd() * 25) : -Math.floor(rnd() * 15);
+        const inMin = sh0 * 60 + sm0 + late;
+        const base = { uid: uidOf(w), workerId: w.id, name: w.name, date: d, lid: loc.id, locName: loc.name, method: pick(['button', 'gps', 'qr']), lat: 3.0333, lng: 101.6167, acc: 12, dist: Math.floor(rnd() * 60), selfie: null, hasSelfie: false, deviceId: 'demo', dept: w.dept, demo: true };
+        ops.push(b => b.set(doc(sub('attendance')), { ...base, type: 'in', ts: at(d, Math.floor(inMin / 60), inMin % 60) }));
+        if (d === t && new Date().getHours() < eh) continue; // hari ini: masih bekerja
+        if (w.payType !== 'hourly') {
+          ops.push(b => b.set(doc(sub('attendance')), { ...base, type: 'break_in', ts: at(d, sh0 + 4, Math.floor(rnd() * 10)) }));
+          ops.push(b => b.set(doc(sub('attendance')), { ...base, type: 'break_out', ts: at(d, sh0 + 5, Math.floor(rnd() * 10)) }));
+        }
+        const outMin = eh * 60 + em + Math.floor(rnd() * 40);
+        ops.push(b => b.set(doc(sub('attendance')), { ...base, type: 'out', ts: at(d, Math.floor(outMin / 60) % 24, outMin % 60) }));
+      }
+    }
+    // Lawatan tapak
+    ops.push(b => b.set(doc(sub('attendance')), { uid: uidOf(workers[4]), workerId: workers[4].id, name: workers[4].name, type: 'visit', ts: at(addDays(t, -1), 11, 20), date: addDays(t, -1), lid: null, locName: L('Tapak Pelanggan - Puchong', 'Client Site - Puchong'), note: L('Servis penghawa dingin', 'Air-cond service'), method: 'gps', lat: 3.03, lng: 101.62, acc: 15, dist: null, selfie: null, hasSelfie: false, deviceId: 'demo', dept: workers[4].dept, demo: true }));
+
+    // 5) Jadual minggu ini
+    Object.entries(roster).forEach(([d, a]) => ops.push(b => b.set(doc(db, 'companies', S.cid, 'roster', d), { a }, { merge: true })));
+
+    // 6) Permohonan
+    const R = (w, data) => ops.push(b => b.set(doc(sub('requests')), { uid: uidOf(w), workerId: w.id, name: w.name, createdAt: serverTimestamp(), demo: true, ...data }));
+    R(workers[2], { kind: 'leave', typeId: 'annual', typeName: leaveTypeName(c, 'annual'), from: addDays(t, -9), to: addDays(t, -8), half: '', days: 2, reason: L('Urusan keluarga', 'Family matters'), status: 'approved', adminNote: 'OK' });
+    R(workers[3], { kind: 'leave', typeId: 'sick', typeName: leaveTypeName(c, 'sick'), from: addDays(t, 3), to: addDays(t, 3), half: '', days: 1, reason: L('Temujanji klinik', 'Clinic appointment'), status: 'pending' });
+    R(workers[0], { kind: 'ot', date: addDays(t, -3), start: '18:00', end: '21:00', hours: 3, approvedHours: 3, otKind: 'normal', reason: L('Stok masuk', 'Stock arrival'), status: 'approved' });
+    R(workers[4], { kind: 'ot', date: addDays(t, -1), start: '23:00', end: '01:00', hours: 2, otKind: 'normal', reason: L('Kerosakan mesin', 'Machine breakdown'), status: 'pending' });
+    R(workers[1], { kind: 'claim', date: addDays(t, -2), amount: 45.6, category: L('Tol', 'Toll'), reason: L('Hantar dokumen ke bank', 'Delivered documents to the bank'), status: 'pending' });
+    R(workers[0], { kind: 'claim', date: addDays(t, -6), amount: 80, approvedAmount: 80, category: L('Minyak', 'Fuel'), reason: L('Lawatan pembekal', 'Supplier visit'), status: 'approved' });
+    R(workers[3], { kind: 'advance', date: addDays(t, -5), amount: 200, approvedAmount: 200, reason: L('Kecemasan', 'Emergency'), status: 'approved' });
+    R(workers[5], { kind: 'fix', date: addDays(t, -1), time: '18:05', type: 'out', reason: L('Terlupa punch keluar', 'Forgot to clock out'), status: 'pending' });
+    R(workers[6], { kind: 'swap', date: addDays(t, 2), withId: workers[7].id, reason: L('Urusan peribadi', 'Personal matters'), status: 'pending' });
+
+    // 7) Tugasan, pengumuman, fail HR
+    [[workers[0], L('Semak stok gudang', 'Check warehouse stock'), 'done'], [workers[2], L('Sediakan menu katering Sabtu', "Prepare Saturday's catering menu"), 'open'], [workers[4], L('Servis mesin pendingin', 'Service the chiller'), 'open']]
+      .forEach(([w, title, status]) => ops.push(b => b.set(doc(sub('tasks')), { uid: uidOf(w), workerId: w.id, name: w.name, title, note: '', date: t, status, ...(status === 'done' ? { doneAt: serverTimestamp(), workerNote: L('Siap, semua cukup', 'Done, all in stock') } : {}), createdAt: serverTimestamp(), demo: true })));
+    ops.push(b => b.set(doc(sub('announcements')), { title: L('Makan malam syarikat', 'Company dinner'), body: L('Makan malam akhir tahun pada Sabtu depan, jam 8 malam. Sila undi lokasi pilihan anda.', 'Year-end dinner next Saturday at 8pm. Please vote for your preferred venue.'), options: ['Restoran Nasi Kandar', 'Restoran Thai', 'BBQ di pejabat'], createdAt: serverTimestamp(), demo: true }));
+    ops.push(b => b.set(doc(sub('announcements')), { title: L('Selamat datang ke sistem kehadiran baharu', 'Welcome to the new attendance system'), body: L('Mulai hari ini sila punch masuk & keluar melalui telefon. Hubungi penyelia jika ada masalah.', 'From today please clock in & out on your phone. Contact your supervisor if you have any issues.'), options: [], createdAt: serverTimestamp(), demo: true }));
+    ops.push(b => b.set(doc(sub('hrfiles')), { workerId: workers[4].id, title: L('Lesen memandu (GDL)', 'Driving licence (GDL)'), expiry: addDays(t, 20), image: null, at: serverTimestamp(), demo: true }));
+    ops.push(b => b.set(doc(sub('hrfiles')), { workerId: workers[3].id, title: L('Sijil tifoid', 'Typhoid certificate'), expiry: addDays(t, -3), image: null, at: serverTimestamp(), demo: true }));
+    ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', workers[1].id), {
+      demo: true, loans: [{ id: 'xloan1', name: L('Pinjaman motosikal', 'Motorcycle loan'), total: 1200, monthly: 200, start: t.slice(0, 7), active: true }],
+      onboard: [{ id: 'o1', item: L('Serah salinan IC', 'Submit IC copy'), done: true }, { id: 'o2', item: L('Buka akaun bank', 'Open bank account'), done: true }, { id: 'o3', item: L('Latihan keselamatan', 'Safety training'), done: false }],
+      reviews: [{ id: 'r1', date: addDays(t, -60), score: 4, notes: L('Teliti dan cepat belajar', 'Careful and learns quickly') }]
+    }, { merge: true }));
+    ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', workers[6].id), { demo: true, warnings: [{ id: 'w1', date: addDays(t, -14), level: L('Amaran lisan', 'Verbal warning'), reason: L('Lewat 3 kali seminggu', 'Late 3 times in a week') }] }, { merge: true }));
+
+    await commitOps(ops);
+    logAct('demo.seed', `${workers.length} workers`);
+    modal({
+      title: L('Data demo siap ✓', 'Demo data ready ✓'),
+      body: `<p>${L('Semua halaman kini ada data contoh. Cuba:', 'Every page now has sample data. Try:')}</p>
+        <ul class="small"><li>${L('Dashboard — kehadiran hari ini, carta 14 hari, peringatan', 'Dashboard — today, 14-day chart, reminders')}</li>
+        <li>${L('Kelulusan — 5 permohonan menunggu', 'Approvals — 5 pending requests')}</li>
+        <li>${L('Gaji → Jana Gaji bulan ini → Kunci → lihat slip', 'Payroll → Generate this month → Lock → view slips')}</li>
+        <li>${L('Laporan, Syif & Jadual, Tugasan, Fail HR', 'Reports, Shifts & Roster, Tasks, HR Files')}</li></ul>
+        <p><b>${L('Login pekerja demo', 'Demo staff login')}</b> (${location.origin}):<br>
+        ID <b class="mono">${workers[0].id}</b> / <b class="mono">${workers[1].id}</b> · PIN <b class="mono">123456</b></p>
+        <p class="xs muted">${L('Kadar caruman demo hanyalah contoh — semak di Gaji → Tetapan Gaji sebelum guna sebenar.', 'Demo contribution rates are examples only — review them in Payroll → Settings before real use.')}</p>`
+    });
+  } catch (e) { console.error(e); toast(authErr(e), 'bad', 6000); }
+  finally { busy(btn, false); }
+}
+
+async function clearDemo(btn) {
+  if (!await confirmBox(L('Padam semua data demo (pekerja, kehadiran, permohonan, tugasan, pengumuman, fail HR demo)? Data sebenar tidak terjejas.', 'Delete all demo data (demo staff, attendance, requests, tasks, announcements, HR files)? Real data is not affected.'))) return;
+  busy(btn, true, L('Memadam…', 'Deleting…'));
+  try {
+    const ops = [];
+    let n = 0;
+    for (const col of DEMO_COLS) {
+      const s = await getDocs(query(sub(col), where('demo', '==', true)));
+      s.docs.forEach(d => {
+        ops.push(b => b.delete(d.ref));
+        if (col === 'workers') { n++; const u = d.data().uid; if (u) ops.push(b => b.delete(doc(db, 'users', u))); }
+      });
+    }
+    const ls = await getDocs(query(sub('locations'), where('demo', '==', true)));
+    ls.docs.forEach(d => ops.push(b => b.delete(d.ref)));
+    if (n) ops.push(b => b.update(cRef(), { workerCount: increment(-n) }));
+    await commitOps(ops);
+    logAct('demo.clear', `${ops.length} docs`);
+    toast(L('Data demo dipadam.', 'Demo data deleted.'));
+  } catch (e) { toast(authErr(e), 'bad'); }
+  finally { busy(btn, false); }
 }
