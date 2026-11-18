@@ -115,7 +115,6 @@ Then go to **Pakej & Harga** and set the trial length and the prices.
 - **Push notifications** (optional): new requests → admin; approve/reject, announcements, tasks → worker
   - To turn them on: Firebase Console → Project settings → Cloud Messaging → Web Push certificates → **Generate key pair**, then paste the key into `VAPID_KEY` in `public/js/config.js`
 - **APK for Google Play**: PNG icons and the manifest are ready. Easiest path: go to https://www.pwabuilder.com, enter `https://proattendancemy.web.app`, choose **Android → Generate**, then upload the `.aab` to Play Console. PWABuilder gives you an `assetlinks.json` file — put it in `public/.well-known/assetlinks.json` and deploy.
-- Integration with Pro POS / ProBurger: not done yet (it needs the code of both apps)
 
 ## Notes for the first deploy after F4–F6
 - The first deploy of the new functions (notification triggers) can sometimes fail with a "permission propagating" error. Wait 2–3 minutes, then press deploy.bat again.
