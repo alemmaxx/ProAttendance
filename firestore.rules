@@ -138,7 +138,7 @@ service cloud.firestore {
         allow create: if isWorkerOf(cid)
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.status == 'pending'
-          && request.resource.data.kind in ['leave', 'ot', 'fix']
+          && request.resource.data.kind in ['leave', 'ot', 'fix', 'claim', 'advance']
           && get(/databases/$(database)/documents/companies/$(cid)/workers/$(request.resource.data.workerId)).data.uid == request.auth.uid
           && companyActive(cid);
         // Pekerja hanya boleh batalkan permohonan sendiri yang masih menunggu
@@ -149,6 +149,19 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
         );
         allow delete: if isAdminOf(cid);
+      }
+
+      // Proses gaji bulanan (draf / dikunci) — admin sahaja
+      match /payruns/{period} {
+        allow read, write: if isAdminOf(cid);
+        allow read: if isSuper();
+      }
+
+      // Slip gaji diterbitkan — pekerja hanya boleh baca slip sendiri
+      match /payslips/{sid} {
+        allow read: if isAdminOf(cid) || isSuper()
+          || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow write: if isAdminOf(cid);
       }
     }
 

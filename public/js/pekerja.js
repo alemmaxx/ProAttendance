@@ -15,6 +15,8 @@ import {
   leaveTypes, leaveTypeName, resolveDay, lateSettings, shiftLabel, loadRoster, countLeaveDays, leaveBalances,
   leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween
 } from './sched.js';
+import { payslipHtml, openPrint, periodLabel } from './payroll.js';
+import { money } from './ui.js';
 
 const app = $('#app');
 const S = {
@@ -495,6 +497,8 @@ function viewMohon() {
       <button class="btn btn-soft btn-block" id="rqLeave">${icon('cal', 18)} ${L('Mohon Cuti / MC', 'Apply Leave / MC')}</button>
       <button class="btn btn-soft btn-block" id="rqOt">${icon('clock', 18)} ${L('Mohon OT', 'Apply Overtime')}</button>
       <button class="btn btn-soft btn-block" id="rqFix">${icon('check', 18)} ${L('Betulkan Punch (terlupa punch)', 'Fix Punch (forgot to punch)')}</button>
+      <button class="btn btn-soft btn-block" id="rqClaim">${icon('money', 18)} ${L('Tuntutan (minyak, tol, dll.)', 'Claim (fuel, toll, etc.)')}</button>
+      <button class="btn btn-soft btn-block" id="rqAdv">${icon('card', 18)} ${L('Pendahuluan Gaji', 'Salary Advance')}</button>
     </div>
   </div>
   <div class="card">
@@ -504,12 +508,16 @@ function viewMohon() {
   $('#rqLeave').onclick = leaveForm;
   $('#rqOt').onclick = otForm;
   $('#rqFix').onclick = fixForm;
+  $('#rqClaim').onclick = claimForm;
+  $('#rqAdv').onclick = advanceForm;
   bindCancel();
 }
 
 function reqDetail(r) {
   if (r.kind === 'leave') return `${esc(r.typeName || leaveTypeName(S.company, r.typeId))} · ${fmtDate(r.from)}${r.to && r.to !== r.from ? ' – ' + fmtDate(r.to) : ''} · ${r.days} ${L('hari', 'day(s)')}${r.half ? ' (' + (r.half === 'am' ? L('pagi', 'AM') : L('petang', 'PM')) + ')' : ''}`;
-  if (r.kind === 'ot') return `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · ${r.hours} ${L('jam', 'hrs')}`;
+  if (r.kind === 'ot') return `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · ${r.approvedHours ?? r.hours} ${L('jam', 'hrs')}`;
+  if (r.kind === 'claim') return `${esc(r.category || '')} · ${fmtDate(r.date)} · ${money(r.approvedAmount ?? r.amount)}${r.paidPeriod ? ' · ' + L('dibayar', 'paid') + ' ' + esc(r.paidPeriod) : ''}`;
+  if (r.kind === 'advance') return `${money(r.approvedAmount ?? r.amount)} · ${fmtDate(r.date)}${r.paidPeriod ? ' · ' + L('dipotong', 'deducted') + ' ' + esc(r.paidPeriod) : ''}`;
   return `${fmtDate(r.date)} · ${TYPE_LABEL[r.type]?.() || r.type} ${esc(r.time)}`;
 }
 
@@ -671,6 +679,62 @@ function fixForm() {
   });
 }
 
+function claimForm() {
+  const t = todayStr();
+  let rcpt = null;
+  const cats = [L('Minyak', 'Fuel'), L('Tol', 'Toll'), L('Parkir', 'Parking'), L('Makan', 'Meals'), L('Pengangkutan', 'Transport'), L('Lain-lain', 'Others')];
+  const m = modal({
+    title: L('Tuntutan', 'Claim'),
+    body: `
+      <div class="grid2">
+        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="cd" value="${t}" max="${t}"></div>
+        <div class="field"><label class="lbl">${L('Jumlah (RM)', 'Amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="ca" inputmode="decimal"></div>
+      </div>
+      <div class="field"><label class="lbl">${L('Kategori', 'Category')}</label>
+        <select class="input" id="cc">${cats.map(c => `<option>${esc(c)}</option>`).join('')}</select></div>
+      <div class="field"><label class="lbl">${L('Keterangan', 'Description')}</label><textarea class="input" id="cr" maxlength="500" style="min-height:60px"></textarea></div>
+      <div class="field"><label class="lbl">${L('Gambar resit', 'Receipt photo')}</label>
+        <input class="input" type="file" accept="image/*" id="cf"><div id="cfPrev" style="margin-top:.4rem"></div></div>`,
+    actions: [
+      { label: L('Batal', 'Cancel') },
+      {
+        label: L('Hantar', 'Submit'), cls: 'btn-primary', onClick: async ({ el }) => {
+          const amount = Number($('#ca', el).value || 0), date = $('#cd', el).value;
+          if (!(amount > 0) || !date) { toast(L('Sila isi tarikh dan jumlah.', 'Please fill in date and amount.'), 'warn'); return false; }
+          try { await submitReq({ kind: 'claim', date, amount, category: $('#cc', el).value, reason: $('#cr', el).value.trim(), attachment: rcpt }); }
+          catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
+  $('#cf', m.el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) { rcpt = null; $('#cfPrev', m.el).innerHTML = ''; return; }
+    try { rcpt = await fileToDataURL(f, 900, 'image/jpeg', 0.6); $('#cfPrev', m.el).innerHTML = `<img src="${rcpt}" style="max-width:120px;border-radius:8px">`; }
+    catch { toast(L('Gagal membaca imej.', 'Failed to read image.'), 'bad'); }
+  };
+}
+
+function advanceForm() {
+  modal({
+    title: L('Pendahuluan Gaji', 'Salary Advance'),
+    body: `
+      <p class="small muted">${L('Jumlah yang diluluskan akan dipotong dalam gaji bulan berikutnya.', 'The approved amount will be deducted from your next payroll.')}</p>
+      <div class="field"><label class="lbl">${L('Jumlah (RM)', 'Amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="aa" inputmode="decimal"></div>
+      <div class="field"><label class="lbl">${L('Sebab', 'Reason')}</label><textarea class="input" id="ar" maxlength="500" style="min-height:60px"></textarea></div>`,
+    actions: [
+      { label: L('Batal', 'Cancel') },
+      {
+        label: L('Hantar', 'Submit'), cls: 'btn-primary', onClick: async ({ el }) => {
+          const amount = Number($('#aa', el).value || 0);
+          if (!(amount > 0)) { toast(L('Sila isi jumlah.', 'Please enter an amount.'), 'warn'); return false; }
+          try { await submitReq({ kind: 'advance', date: todayStr(), amount, reason: $('#ar', el).value.trim() }); }
+          catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
+}
+
 // ---------------------------------------------------------------- BERITA
 async function viewBerita() {
   const v = $('#view');
@@ -708,6 +772,7 @@ function viewProfil() {
     ${row(L('Telefon', 'Phone'), w.phone)}
     ${row(L('Syarikat', 'Company'), S.company.name)}
   </div>
+  <div class="card"><h3>${L('Slip Gaji', 'Payslips')}</h3><div id="slips"><div class="loader" style="min-height:60px"><span class="spin"></span></div></div></div>
   <div class="card stack">
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
     <button class="btn btn-ghost btn-block" id="chPin">${icon('shield', 18)} ${L('Tukar PIN', 'Change PIN')}</button>
@@ -718,4 +783,20 @@ function viewProfil() {
   $('#chPin').onclick = () => pinModal(false);
   $('#langB').onclick = () => $('[data-lang-toggle]')?.click();
   $('#lo').onclick = () => signOut(auth);
+  loadSlips();
+}
+
+async function loadSlips() {
+  try {
+    const s = await getDocs(query(collection(db, 'companies', S.cid, 'payslips'), where('uid', '==', S.user.uid)));
+    const list = s.docs.map(d => d.data()).sort((a, b) => b.period.localeCompare(a.period));
+    const box = $('#slips'); if (!box) return;
+    box.innerHTML = list.length ? list.map((x, i) => `<div class="set-row"><div><b>${esc(periodLabel(x.period))}</b><div class="small muted">${L('Bersih', 'Net')}: ${money(x.net)}</div></div>
+      <button class="btn btn-sm btn-soft" data-slip="${i}">${icon('doc', 16)} ${L('Lihat', 'View')}</button></div>`).join('')
+      : `<div class="empty small">${L('Belum ada slip gaji.', 'No payslips yet.')}</div>`;
+    $$('[data-slip]', box).forEach(b => b.onclick = () => {
+      const x = list[Number(b.dataset.slip)];
+      if (!openPrint(payslipHtml(S.company, x, x.period), false)) toast(L('Benarkan pop-up untuk lihat slip.', 'Allow pop-ups to view the slip.'), 'warn');
+    });
+  } catch (e) { const box = $('#slips'); if (box) box.innerHTML = `<div class="empty small">${esc(authErr(e))}</div>`; }
 }

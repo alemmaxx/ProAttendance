@@ -113,7 +113,9 @@ export function leaveDateMap(reqs) {
 export const REQ_LABEL = {
   leave: () => L('Cuti', 'Leave'),
   ot: () => 'OT',
-  fix: () => L('Pembetulan punch', 'Punch correction')
+  fix: () => L('Pembetulan punch', 'Punch correction'),
+  claim: () => L('Tuntutan', 'Claim'),
+  advance: () => L('Pendahuluan gaji', 'Salary advance')
 };
 export const STATUS_BADGE = (s) => ({
   pending: `<span class="badge b-warn">${L('Menunggu', 'Pending')}</span>`,

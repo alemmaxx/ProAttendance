@@ -80,3 +80,11 @@ Then go to **Pakej & Harga** and set the trial length and the prices.
 - An Approvals page (pending / history), plus a pending badge on the dashboard
 - Reports: leave, absences based on roster/shifts/holidays, and OT by category
 - WhatsApp: worker → employer, and admin → worker
+
+## Phase 3 (F3) — done
+- Payroll: generate each month's draft automatically (basic pay, allowances, approved OT, leave, absences, lateness, claims, advances, contributions)
+- Every line is editable with (+), with a "Recalculate contributions" button
+- Contribution rates (EPF, SOCSO, EIS) are entered manually as percentages in Payroll Settings, or as fixed amounts per worker (PCB included)
+- Lock & Publish: payslips reach workers, claims and advances are marked paid, and "one-time" items are removed
+- Payslips as PDF (print) with the company logo, a bulk print of all slips, Excel export, and a bank file (CSV)
+- Workers: claims (with receipt photo), salary advances, and their payslips in the Profil tab
