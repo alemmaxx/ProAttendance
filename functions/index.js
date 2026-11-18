@@ -12,7 +12,7 @@ const TOYYIB_KEY = defineSecret('TOYYIBPAY_SECRET_KEY'); // dikongsi dengan KUKU
 
 const REGION = 'asia-southeast1';
 const TOYYIB = 'https://toyyibpay.com';
-const SITE = 'https://proattendance.web.app';
+const SITE = 'https://proattendancemy.web.app';
 const PLAN_MONTHS = { monthly: 1, sixMonth: 6, yearly: 12 };
 const PLAN_NAME = { monthly: 'Bulanan', sixMonth: '6 Bulan', yearly: 'Tahunan' };
 

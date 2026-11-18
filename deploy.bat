@@ -53,7 +53,7 @@ echo.
 if errorlevel 1 (
   echo [X] Deploy GAGAL. Semak mesej di atas.
 ) else (
-  echo [OK] Siap! Buka https://proattendance.web.app
+  echo [OK] Siap! Buka https://proattendancemy.web.app
 )
 echo.
 pause

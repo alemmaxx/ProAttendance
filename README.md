@@ -2,9 +2,9 @@
 
 A worker attendance system sold as a subscription (SaaS) to many companies. Each company sees its own name and logo. The name "ProAttendance" only appears in the website name.
 
-- **Workers:** https://proattendance.web.app (log in with staff ID + PIN)
-- **Company admin:** https://proattendance.web.app/admin.html
-- **Super Admin:** https://proattendance.web.app/superadmin.html
+- **Workers:** https://proattendancemy.web.app (log in with staff ID + PIN)
+- **Company admin:** https://proattendancemy.web.app/admin.html
+- **Super Admin:** https://proattendancemy.web.app/superadmin.html
 - **QR kiosk:** opened from the admin's **Lokasi** page (`/qr.html?l=…`)
 
 ## Folder structure
@@ -31,11 +31,11 @@ Firebase Console → Firestore → **Create database**
 - Location: `asia-southeast1`
 
 ### 3. Hosting site
-Firebase Console → Hosting → **Add another site**, then enter `proattendance`.
+Firebase Console → Hosting → **Add another site**, then enter `proattendancemy`.
 
 ### 4. Authentication
 - Sign-in method: turn on **Email/Password** and **Google** (if not already on).
-- Settings → Authorized domains: add `proattendance.web.app`.
+- Settings → Authorized domains: add `proattendancemy.web.app`.
 
 ### 5. GitHub secret (automatic deploy)
 1. Firebase Console → Project settings → Service accounts → **Generate new private key**
