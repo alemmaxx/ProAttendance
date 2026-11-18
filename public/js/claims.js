@@ -43,7 +43,7 @@ export function journeyTotal(j, R) {
 }
 export const purchaseTotal = (p) => r2(Number(p.amount || 0) + Number(p.sst || 0));
 export function allowanceTotal(a, R) {
-  return r2(Number(a.project || 0) + Number(a.outstation || 0) * R.outstation + Number(a.overnight || 0) * R.overnight);
+  return r2(Number(a.project || 0));
 }
 
 // Kira semua jumlah borang
@@ -77,17 +77,16 @@ export function computeClaim(claim, c) {
   const COLS = ['mileage', 'toll', 'travel', 'outOver', 'lodging', 'parking', 'fnb', 'tools', 'stationery', 'medical', 'others'];
   const sub = Object.fromEntries(COLS.map(k => [k, r2(rows.reduce((a, r) => a + r[k], 0))]));
   const kmTotal = J.reduce((a, j) => a + Number(j.km || 0), 0);
-  const offset = sub.mileage > 0 ? R.offset : 0;
+  // Syarikat tanggung RM offset pertama mileage; hanya baki selepas offset boleh dituntut (resit tidak terlibat)
+  const offset = r2(Math.min(R.offset, sub.mileage));
   sub.mileage = r2(sub.mileage - offset);
   const totalExpenses = r2(COLS.reduce((a, k) => a + sub[k], 0));
   // Elaun: borang elaun
   const allowSub = {
-    project: r2(A.reduce((a, x) => a + Number(x.project || 0), 0)),
-    outstation: r2(A.reduce((a, x) => a + Number(x.outstation || 0), 0) * R.outstation),
-    overnight: r2(A.reduce((a, x) => a + Number(x.overnight || 0), 0) * R.overnight)
+    project: r2(A.reduce((a, x) => a + Number(x.project || 0), 0))
   };
   const allowanceTotalAll = r2(Object.values(allowSub).reduce((a, v) => a + v, 0));
-  const justTotal = r2(J.reduce((a, j) => a + journeyTotal(j, R), 0) - (kmTotal > 0 ? R.offset : 0));
+  const justTotal = r2(J.reduce((a, j) => a + journeyTotal(j, R), 0) - offset);
   const sstSub = {
     amount: r2(P.reduce((a, p) => a + Number(p.amount || 0), 0)),
     sst: r2(P.reduce((a, p) => a + Number(p.sst || 0), 0)),
@@ -137,10 +136,10 @@ export function claimDocHtml(c, claim, files = {}) {
   // 2. ALLOWANCE FORM
   const A = claim.allowances || [];
   const af = `<div class="pg">${head('ALLOWANCE CLAIM FORM')}
-    <table class="g"><thead><tr><th>No</th><th>Expenses Details</th><th>Project<br>Allowance</th><th>Outstation<br>Allowance</th><th>Overnight<br>Allowance</th></tr></thead>
-    <tbody>${A.map((a, i) => `<tr><td>${i + 1}</td><td>${esc(a.details || '')}</td><td class="r">${n2(a.project)}</td><td class="r">${a.outstation || ''}</td><td class="r">${a.overnight || ''}</td></tr>`).join('') || '<tr><td colspan="5" class="c">-</td></tr>'}
-      <tr class="tt"><td></td><td>Sub-Total</td><td class="r">${n2(X.allowSub.project)}</td><td class="r">${n2(X.allowSub.outstation)}</td><td class="r">${n2(X.allowSub.overnight)}</td></tr></tbody></table>
-    <p class="s">Outstation × RM${R.outstation} · Overnight × RM${R.overnight}</p>
+    <table class="g"><thead><tr><th>No</th><th>Expenses Details</th><th>Project<br>Allowance</th></tr></thead>
+    <tbody>${A.map((a, i) => `<tr><td>${i + 1}</td><td>${esc(a.details || '')}</td><td class="r">${n2(a.project)}</td></tr>`).join('') || '<tr><td colspan="3" class="c">-</td></tr>'}
+      <tr class="tt"><td></td><td>Sub-Total</td><td class="r">${n2(X.allowSub.project)}</td></tr></tbody></table>
+    <p class="s">${L('Outstation & overnight dituntut dalam Justification Form.', 'Outstation & overnight are claimed in the Justification Form.')}</p>
     <table class="sum"><tr class="big"><td>Total Expenses</td><td class="r">${n2(X.allowanceTotal)}</td></tr></table>
     ${sign()}</div>`;
 
@@ -210,11 +209,11 @@ export function claimExcel(c, claim) {
   XLSX.utils.book_append_sheet(wb, ws1, 'CLAIM FORM');
   const A = claim.allowances || [];
   const af = [...top('ALLOWANCE CLAIM  FORM'),
-    ['No', 'Expenses Details', 'Project\nAllowance', 'Outstation\nAllowance', 'Overnight\nAllowance'],
-    ...A.map((a, i) => [i + 1, a.details || '', a.project || '', a.outstation || '', a.overnight || '']),
-    ['Sub-Total', '', X.allowSub.project, X.allowSub.outstation, X.allowSub.overnight],
-    ['', '', '', 'Total Expenses ', X.allowanceTotal], ['            Approved by:'], ['', claim.approvedBy || '…………………………………………………..']];
-  const ws2 = XLSX.utils.aoa_to_sheet(af); ws2['!cols'] = [{ wch: 8 }, { wch: 34 }, ...Array(3).fill({ wch: 14 })];
+    ['No', 'Expenses Details', 'Project\nAllowance'],
+    ...A.map((a, i) => [i + 1, a.details || '', a.project || '']),
+    ['Sub-Total', '', X.allowSub.project],
+    ['', 'Total Expenses ', X.allowanceTotal], ['            Approved by:'], ['', claim.approvedBy || '…………………………………………………..']];
+  const ws2 = XLSX.utils.aoa_to_sheet(af); ws2['!cols'] = [{ wch: 8 }, { wch: 34 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws2, 'ALLOWANCE FORM');
   const P = claim.purchases || [];
   const sf = [...top('SST PURCHASES CLAIM FORM'),

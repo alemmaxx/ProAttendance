@@ -2852,7 +2852,10 @@ function openClaimAdmin(cl, after) {
       ...(cl.status === 'submitted' ? [
         { label: L('Tolak', 'Reject'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
         { label: L('Lulus', 'Approve'), cls: 'btn-ok', autoClose: false, onClick: () => { decideClaim(true); return false; } }] : []),
-      ...(cl.status === 'approved' ? [{ label: L('Tanda sudah dibayar', 'Mark as paid'), cls: 'btn-primary', autoClose: false, onClick: () => { markPaid(); return false; } }] : []),
+      ...(cl.status === 'approved' ? [
+        { label: L('Tolak / minta edit', 'Reject / request edit'), cls: 'btn-danger', autoClose: false, onClick: () => { decideClaim(false); return false; } },
+        { label: L('Tanda sudah dibayar', 'Mark as paid'), cls: 'btn-primary', autoClose: false, onClick: () => { markPaid(); return false; } }] : []),
+      ...(cl.status === 'paid' ? [{ label: L('Batal status dibayar', 'Undo paid'), cls: 'btn-ghost', autoClose: false, onClick: () => { undoPaid(); return false; } }] : []),
       { label: L('Tutup', 'Close') }
     ]
   });
@@ -2862,7 +2865,7 @@ function openClaimAdmin(cl, after) {
     title: ok ? L('Luluskan tuntutan', 'Approve claim') : L('Tolak tuntutan', 'Reject claim'),
     body: `<p class="small">${esc(cl.name)} · ${esc(cl.month)} · <b>${money(X.reimbursement)}</b></p>
       ${ok ? `<div class="field"><label class="lbl">${L('Diluluskan oleh (nama)', 'Approved by (name)')}</label><input class="input" id="dBy" value="${esc(S.user.displayName || S.user.email || '')}"></div>` : ''}
-      <div class="field"><label class="lbl">${ok ? L('Catatan (pilihan)', 'Note (optional)') : L('Sebab ditolak (wajib)', 'Reason for rejection (required)')}</label><textarea class="input" id="dN" maxlength="300" style="min-height:60px"></textarea></div>`,
+      <div class="field">${!ok ? `<p class="xs muted">${L('Pekerja boleh edit borang ini dan hantar semula.', 'The staff member can edit this form and resubmit.')}</p>` : ''}<label class="lbl">${ok ? L('Catatan (pilihan)', 'Note (optional)') : L('Sebab ditolak (wajib)', 'Reason for rejection (required)')}</label><textarea class="input" id="dN" maxlength="300" style="min-height:60px"></textarea></div>`,
     actions: [{ label: L('Batal', 'Cancel') }, {
       label: ok ? L('Lulus', 'Approve') : L('Tolak', 'Reject'), cls: ok ? 'btn-ok' : 'btn-danger', onClick: async ({ el }) => {
         const note = $('#dN', el).value.trim();
@@ -2878,6 +2881,11 @@ function openClaimAdmin(cl, after) {
       }
     }]
   });
+  const undoPaid = async () => {
+    if (!(await confirmBox(L('Batalkan status dibayar? Tuntutan akan kembali ke "Diluluskan".', 'Undo paid? The claim goes back to "Approved".')))) return;
+    try { await updateDoc(ref, { status: 'approved', paidRef: '', paidAt: null }); logAct('claim.unpaid', cl.id); toast(L('Status dibayar dibatalkan.', 'Paid status undone.')); m.close(); after && after(); }
+    catch (e) { toast(authErr(e), 'bad'); }
+  };
   const markPaid = () => modal({
     title: L('Tanda sudah dibayar', 'Mark as paid'),
     body: `<div class="field"><label class="lbl">${L('Rujukan bayaran (cth: no. transaksi bank, tarikh)', 'Payment reference (e.g. bank transaction no., date)')}</label><input class="input" id="pRef" value="${todayStr().split('-').reverse().join('/')}"></div>`,

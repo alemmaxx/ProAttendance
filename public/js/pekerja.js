@@ -1038,9 +1038,9 @@ function claimEditor(month, tab = 'j') {
         await saveClaim(cl); m.close(); claimEditor(month, 'p');
       });
     } else if (t === 'a') {
-      body.innerHTML = `<p class="xs muted">ALLOWANCE CLAIM FORM · Outstation × RM${R.outstation} · Overnight × RM${R.overnight}</p>
+      body.innerHTML = `<p class="xs muted">ALLOWANCE CLAIM FORM · Project Allowance</p>
         ${A.length ? `<div class="table-wrap"><table><thead><tr><th>No</th><th>${L('Butiran', 'Details')}</th><th class="right">RM</th><th></th></tr></thead><tbody>
-          ${A.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.details || '-')}</b><div class="xs muted">${a.project ? 'Project RM' + a.project + ' · ' : ''}${a.outstation ? 'Outst ' + a.outstation + ' · ' : ''}${a.overnight ? 'Overn ' + a.overnight : ''}</div></td>
+          ${A.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.details || '-')}</b><div class="xs muted">${a.project ? 'Project RM' + a.project : ''}</div></td>
             <td class="right bold">${allowanceTotal(a, R).toFixed(2)}</td><td style="white-space:nowrap">${ed ? `<button class="icon-btn" data-ae="${i}">✎</button><button class="icon-btn" data-ad="${i}">✕</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
           : `<div class="empty small">${L('Tiada elaun.', 'No allowances.')}</div>`}
         ${addBtn('aAdd', L('Tambah elaun', 'Add allowance'))}`;
@@ -1178,8 +1178,8 @@ function allowanceForm(cl, a = {}, idx = null, after) {
   const m = modal({
     title: L('Elaun (Allowance Claim Form)', 'Allowance (Allowance Claim Form)'),
     body: `<div class="field"><label class="lbl">Expenses Details</label><input class="input" id="ad" maxlength="150" value="${esc(a.details || '')}"></div>
-      <div class="grid2">${f('project', 'Project Allowance (RM)')}${f('outstation', `Outstation (${L('hari', 'days')}) × RM${R.outstation}`, '1')}</div>
-      <div class="grid2">${f('overnight', `Overnight (${L('malam', 'nights')}) × RM${R.overnight}`, '1')}</div>
+      ${f('project', 'Project Allowance (RM)')}
+      <p class="xs muted">${L('Outstation & overnight diisi dalam tab Perjalanan.', 'Outstation & overnight are entered in the Journey tab.')}</p>
       <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>Total (RM)</b><b id="at" style="color:var(--gold);font-size:1.2rem">0.00</b></div></div>`,
     actions: [
       { label: L('Batal', 'Cancel'), onClick: () => { after && setTimeout(after, 60); } },
