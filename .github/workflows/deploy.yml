@@ -1,5 +1,8 @@
 name: Deploy ke Firebase Hosting
 
+# Pilihan: deploy automatik dari GitHub.
+# Hanya berjalan jika secret FIREBASE_SERVICE_ACCOUNT_KUKUSANMY telah ditambah.
+# Jika tidak, guna deploy.bat di komputer.
 on:
   push:
     branches: [main]
@@ -8,9 +11,15 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      HAS_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KUKUSANMY != '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Langkau (tiada secret)
+        if: env.HAS_SA != 'true'
+        run: echo "Secret belum ditambah - guna deploy.bat untuk deploy."
       - uses: FirebaseExtended/action-hosting-deploy@v0
+        if: env.HAS_SA == 'true'
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KUKUSANMY }}
