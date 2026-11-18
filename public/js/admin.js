@@ -1198,6 +1198,8 @@ function viewSettings() {
       <label class="switch"><input type="checkbox" id="tDev" ${st.oneDevice ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><div><b>${L('Butang Lawatan Tapak', 'Site Visit button')}</b><div class="small muted">${L('Pekerja lapangan boleh rekod lawatan ke tapak/pelanggan (GPS + gambar).', 'Field staff can record visits to sites/clients (GPS + photo).')}</div></div>
       <label class="switch"><input type="checkbox" id="tVisit" ${st.visits ? 'checked' : ''}><span></span></label></div>
+    <div class="set-row"><div><b>${L('Kadar tuntutan perbatuan', 'Mileage claim rate')}</b><div class="small muted">${L('RM sekilometer. Pekerja isi jarak (km), jumlah dikira sendiri. Kosong = pekerja isi jumlah sendiri.', 'RM per km. Staff enter the distance (km) and the amount is calculated. Blank = staff enter the amount.')}</div></div>
+      <input class="input" type="number" step="0.01" min="0" id="wMile" value="${st.mileageRate ?? ''}" placeholder="0.60" style="max-width:110px"></div>
     <button class="btn btn-primary" id="saveWork" style="margin-top:.8rem">${L('Simpan Tetapan', 'Save Settings')}</button>
   </div>
 
@@ -1316,7 +1318,7 @@ function viewSettings() {
         'settings.autoBreak': $('#tABrk').checked, 'settings.breakStart': $('#wBs').value || '', 'settings.breakEnd': $('#wBe').value || '',
         'settings.autoOT': $('#tAOT').checked, 'settings.otMin': Number($('#wOm').value || 0), 'settings.otRound': Math.max(1, Number($('#wOr').value || 15)),
         'settings.workDays': $$('[data-wd]').filter(x => x.checked).map(x => Number(x.dataset.wd)),
-        'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked
+        'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked, 'settings.mileageRate': Number($('#wMile').value || 0)
       });
       logAct('settings.work');
       toast(L('Tetapan disimpan.', 'Settings saved.'));
@@ -1671,7 +1673,7 @@ async function drawApprovals() {
       const o = S.workers.find(x => x.id === r.withId);
       detail = `${fmtDate(r.date)} · ${L('tukar syif dengan', 'swap shift with')} <b>${esc(r.withId)}</b> ${o ? esc(o.name) : `<span class="badge b-bad">${L('ID tidak wujud', 'ID not found')}</span>`}`;
     } else if (r.kind === 'claim') {
-      detail = `<b>${esc(r.category || '')}</b> · ${fmtDate(r.date)} · <b>${money(r.approvedAmount ?? r.amount)}</b>${r.paidPeriod ? ` · <span class="badge b-ok">${L('Dibayar', 'Paid')} ${esc(r.paidPeriod)}</span>` : ''}`;
+      detail = `<b>${esc(r.category || '')}</b>${r.km ? ` · ${r.km} km` : ''} · ${fmtDate(r.date)} · <b>${money(r.approvedAmount ?? r.amount)}</b>${r.paidPeriod ? ` · <span class="badge b-ok">${L('Dibayar', 'Paid')} ${esc(r.paidPeriod)}</span>` : ''}`;
     } else if (r.kind === 'advance') {
       detail = `<b>${money(r.approvedAmount ?? r.amount)}</b> · ${fmtDate(r.date)}${r.paidPeriod ? ` · <span class="badge b-ok">${L('Dipotong', 'Deducted')} ${esc(r.paidPeriod)}</span>` : ''}`;
     } else {

@@ -13,7 +13,7 @@ try {
 } catch (e) { /* notifikasi tidak disokong */ }
 
 // ProAttendance service worker — network-first, cache sebagai sandaran
-const CACHE = 'pa-v6';
+const CACHE = 'pa-v7';
 const SHELL = ['/', '/index.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/js/sched.js', '/js/payroll.js', '/js/push.js', '/icon.svg', '/icon-192.png', '/manifest.json'];
 
 self.addEventListener('install', e => {

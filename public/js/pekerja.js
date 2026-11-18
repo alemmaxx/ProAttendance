@@ -13,7 +13,7 @@ import {
 } from './ui.js';
 import {
   leaveTypes, leaveTypeName, resolveDay, lateSettings, shiftLabel, loadRoster, countLeaveDays, leaveBalances,
-  leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween, submitAutoOT
+  leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween, submitAutoOT, weekStart
 } from './sched.js';
 import { payslipHtml, openPrint, periodLabel } from './payroll.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
@@ -288,6 +288,7 @@ function viewHome() {
   const cls = { in: 'in', out: 'out', break_in: 'brk', break_out: 'brk' }[main];
   const ico = { in: 'clock', out: 'out', break_in: 'clock', break_out: 'clock' }[main];
   v.innerHTML = `
+  <div class="card" id="weekStrip" style="margin-bottom:12px"></div>
   <div class="card clock-card">
     <div class="big-time" id="bigTime">--:--</div>
     <div class="muted" id="bigDate"></div>
@@ -313,6 +314,7 @@ function viewHome() {
       <span class="badge">${esc(r.locName || METHOD_LABEL[r.method || 'button']?.() || '')}</span></li>`).join('')}</ul>`
       : `<div class="empty small">${L('Belum ada rekod hari ini.', 'No records yet today.')}</div>`}
   </div>
+  ${leaveChipsHtml()}
   <div id="taskCard"></div>
   ${upcomingHtml()}`;
   const tick = () => {
@@ -326,7 +328,56 @@ function viewHome() {
   $('#visitBtn') && ($('#visitBtn').onclick = visitForm);
   $$('[data-plan]').forEach(r => r.onclick = () => planNote(r.dataset.plan));
   loadTasks();
+  drawWeekStrip();
+  $('#lvCard') && ($('#lvCard').onclick = () => go('mohon'));
   $$('[data-alt]').forEach(b => b.onclick = (e) => punch(b.dataset.alt, e.currentTarget));
+}
+
+// Baki cuti ringkas di skrin utama
+function leaveChipsHtml() {
+  const bal = leaveBalances(S.company, S.worker, S.reqs.filter(r => r.status === 'approved')).filter(b => b.ent + b.carry > 0);
+  if (!bal.length) return '';
+  return `<div class="card" id="lvCard" style="cursor:pointer"><div class="card-head" style="margin-bottom:.5rem"><h3>${L('Baki cuti', 'Leave balance')} ${new Date().getFullYear()}</h3><span class="xs muted">${L('Mohon cuti', 'Apply')} ›</span></div>
+    <div class="row">${bal.map(b => `<span class="badge ${b.left <= 0 ? 'b-bad' : 'b-ok'}" style="font-size:13px;padding:5px 11px">${esc(b.name)}: <b>${b.left}</b> / ${b.ent + b.carry}</span>`).join('')}</div></div>`;
+}
+
+// Jalur kalendar minggu (skrin utama)
+async function drawWeekStrip() {
+  const box = $('#weekStrip'); if (!box) return;
+  S.wk = S.wk || weekStart(todayStr());
+  const from = S.wk, to = addDays(from, 6), t = todayStr();
+  const days = Array.from({ length: 7 }, (_, i) => addDays(from, i));
+  const lbl = `${fmtDate(from, { day: 'numeric', month: 'short' })} – ${fmtDate(to, { day: 'numeric', month: 'short' })}`;
+  const paint = (byDate) => {
+    const lv = leaveDateMap(S.reqs), hol = holidayMap(S.company);
+    box.innerHTML = `<div class="row between" style="margin-bottom:.6rem">
+        <button class="icon-btn" id="wkP">${icon('left', 18)}</button><b>${lbl}</b><button class="icon-btn" id="wkN">${icon('right', 18)}</button></div>
+      <div class="cal" style="margin:0">${days.map(d => {
+        const dt = new Date(d + 'T00:00:00'), inf = dayInfo(d), recs = byDate?.[d] || [];
+        const pun = recs.filter(r => r.type !== 'visit');
+        const sm = pun.length ? summarizeDay(pun, lateSettings(S.company, inf), d) : null;
+        let cls = 'cal-f';
+        if (sm?.firstIn) cls = sm.lateMin ? 'cal-late' : 'cal-ok';
+        else if (lv[d]) cls = 'cal-leave';
+        else if (hol[d] || inf.type === 'holiday') cls = 'cal-hol';
+        else if (inf.type === 'off') cls = 'cal-off';
+        else if (d < t && byDate) cls = 'cal-abs';
+        const mark = S.plans?.[d] || recs.some(r => r.type === 'visit');
+        return `<button class="cal-d ${cls} ${d === t ? 'cal-today' : ''}" data-wd="${d}" style="aspect-ratio:auto;padding:6px 0;line-height:1.1">
+          <span style="font-size:10px;font-weight:600;opacity:.8">${dayName(dt.getDay())}</span><br>${dt.getDate()}${mark ? '<i></i>' : ''}</button>`;
+      }).join('')}</div>
+      <p class="xs muted center" style="margin:.5rem 0 0">${L('Tekan tarikh untuk butiran, catatan & tuntutan', 'Tap a date for details, notes & claims')}</p>`;
+    $('#wkP').onclick = () => { S.wk = addDays(S.wk, -7); drawWeekStrip(); };
+    $('#wkN').onclick = () => { S.wk = addDays(S.wk, 7); drawWeekStrip(); };
+    $$('[data-wd]', box).forEach(b => b.onclick = () => openDay(b.dataset.wd, byDate ? (byDate[b.dataset.wd] || []) : undefined));
+  };
+  paint(null);
+  try {
+    const q = await getDocs(query(collection(db, 'companies', S.cid, 'attendance'), where('uid', '==', S.user.uid), where('date', '>=', from), where('date', '<=', to)));
+    const byDate = {};
+    q.docs.forEach(x => { const r = { id: x.id, ...x.data({ serverTimestamps: 'estimate' }) }; (byDate[r.date] = byDate[r.date] || []).push(r); });
+    if ($('#weekStrip') === box && S.wk === from) paint(byDate);
+  } catch { /* abaikan */ }
 }
 
 // Jadual 7 hari akan datang
@@ -553,19 +604,46 @@ function planNote(date, after) {
     ]
   });
 }
-function dayDetail(d, recs, inf, lvReq, holName) {
-  const sm = recs ? summarizeDay(recs, lateSettings(S.company, inf), d) : null;
-  const row = (k, v) => v ? `<div class="set-row"><span class="muted small">${k}</span><b>${v}</b></div>` : '';
-  modal({
+// Butiran satu hari: kehadiran, lawatan, catatan + tindakan (tuntutan / betulkan punch)
+async function openDay(d, recs) {
+  if (!recs) {
+    try {
+      const q = await getDocs(query(collection(db, 'companies', S.cid, 'attendance'), where('uid', '==', S.user.uid), where('date', '>=', d), where('date', '<=', d)));
+      recs = q.docs.map(x => ({ id: x.id, ...x.data({ serverTimestamps: 'estimate' }) }));
+    } catch { recs = []; }
+  }
+  const inf = dayInfo(d), lvReq = leaveDateMap(S.reqs)[d], holName = holidayMap(S.company)[d];
+  const punches = recs.filter(r => r.type !== 'visit'), visits = recs.filter(r => r.type === 'visit');
+  const sm = punches.length ? summarizeDay(punches, lateSettings(S.company, inf), d) : null;
+  const claims = S.reqs.filter(r => r.kind === 'claim' && r.date === d && r.status !== 'cancelled');
+  const row = (k, v) => v ? `<div class="set-row"><span class="muted small">${k}</span><b class="right">${v}</b></div>` : '';
+  const t = todayStr();
+  const visitTxt = visits.map(v => `${fmtTime(punchTime(v))} ${v.locName}${v.note ? ' (' + v.note + ')' : ''}`).join('; ');
+  const m = modal({
     title: fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     body: `${row(L('Syif', 'Shift'), inf.shift ? esc(shiftLabel(inf.shift)) : (inf.type === 'off' ? L('Hari rehat', 'Rest day') : ''))}
       ${row(L('Cuti umum', 'Public holiday'), holName ? esc(holName) : '')}
       ${row(L('Cuti', 'Leave'), lvReq ? esc(lvReq.typeName || '') : '')}
       ${sm ? row(L('Masuk', 'In'), fmtTime(sm.firstIn)) + row(L('Keluar', 'Out'), sm.open ? L('masih bekerja', 'still working') : fmtTime(sm.lastOut))
         + row(L('Jam kerja', 'Hours'), minsToHM(sm.workMin)) + row(L('Rehat', 'Break'), sm.breakMin >= 1 ? Math.round(sm.breakMin) + 'm' + (sm.autoBreak ? ' (auto)' : '') : '')
-        + row(L('Lewat', 'Late'), sm.lateMin ? sm.lateMin + 'm' : '') : ''}
-      <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b>${esc(S.plans?.[d] || '-')}</b></div>`,
-    actions: [{ label: L('Tutup', 'Close') }, { label: '📍 ' + (S.plans?.[d] ? L('Ubah catatan', 'Edit note') : L('Tambah catatan', 'Add note')), cls: 'btn-primary', onClick: () => { setTimeout(() => planNote(d), 50); } }]
+        + row(L('Lewat', 'Late'), sm.lateMin ? sm.lateMin + 'm' : '') : (d <= t && inf.type === 'work' && !lvReq ? row(L('Status', 'Status'), `<span class="badge b-bad">${L('Tiada punch', 'No punch')}</span>`) : '')}
+      ${visits.length ? `<div class="sec-title">${L('Lawatan tapak', 'Site visits')}</div>${visits.map(v => `<div class="set-row"><span>${fmtTime(punchTime(v))} · ${esc(v.locName)}${v.note ? `<div class="xs muted">${esc(v.note)}</div>` : ''}</span>${v.lat != null ? `<a class="xs" target="_blank" href="https://www.google.com/maps?q=${v.lat},${v.lng}">${L('Peta', 'Map')}</a>` : ''}</div>`).join('')}` : ''}
+      ${claims.length ? `<div class="sec-title">${L('Tuntutan hari ini', 'Claims this day')}</div>${claims.map(c => `<div class="set-row"><span>${esc(c.category || '')}${c.km ? ` · ${c.km} km` : ''}</span><span>${money(c.approvedAmount ?? c.amount)} ${STATUS_BADGE(c.status)}</span></div>`).join('')}` : ''}
+      <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b class="right">${esc(S.plans?.[d] || '-')}</b></div>
+      <div class="stack" style="margin-top:.8rem">
+        <button class="btn btn-soft btn-block" data-da="note">📍 ${S.plans?.[d] ? L('Ubah catatan', 'Edit note') : L('Tambah catatan pergi mana', 'Add where-to note')}</button>
+        ${d <= t ? `<button class="btn btn-soft btn-block" data-da="claim">💰 ${L('Buat tuntutan untuk hari ini (perbatuan, tol…)', 'Make a claim for this day (mileage, toll…)')}</button>
+        <button class="btn btn-ghost btn-block" data-da="fix">✏️ ${L('Terlupa punch? Betulkan', 'Forgot to punch? Fix it')}</button>` : ''}
+      </div>`
+  });
+  $$('[data-da]', m.el).forEach(b => b.onclick = () => {
+    m.close();
+    const a = b.dataset.da;
+    setTimeout(() => {
+      if (a === 'note') planNote(d);
+      else if (a === 'claim') claimForm({ date: d, cat: L('Perbatuan (km)', 'Mileage (km)'), desc: [S.plans?.[d], visitTxt].filter(Boolean).join(' — ') });
+      else fixForm({ date: d });
+    }, 60);
   });
 }
 function refreshPlanViews() { if (S.tab === 'home') viewHome(); else if (S.tab === 'rekod') viewRekod(); }
@@ -648,7 +726,7 @@ async function viewRekod() {
           ${right}
         </div>`;
       }).join('') : `<div class="empty">${L('Tiada rekod untuk bulan ini.', 'No records this month.')}</div>`}`;
-    $$('[data-cd]').forEach(b => b.onclick = () => dayDetail(b.dataset.cd, byDate[b.dataset.cd], info(b.dataset.cd), lv[b.dataset.cd], hol[b.dataset.cd]));
+    $$('[data-cd]').forEach(b => b.onclick = () => openDay(b.dataset.cd, byDate[b.dataset.cd] || []));
   } catch (e) {
     console.error(e);
     $('#rekBody').innerHTML = `<div class="empty">${L('Gagal memuatkan rekod.', 'Failed to load records.')}<br><span class="xs">${esc(e.message)}</span></div>`;
@@ -829,14 +907,14 @@ function otForm() {
   upd();
 }
 
-function fixForm() {
+function fixForm(pre = {}) {
   const t = todayStr();
   const m = modal({
     title: L('Betulkan Punch', 'Fix Punch'),
     body: `
       <p class="small muted">${L('Untuk punch yang terlupa. Majikan akan semak dan luluskan.', 'For a missed punch. Your employer will review and approve.')}</p>
       <div class="grid2">
-        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="fd" value="${t}" max="${t}"></div>
+        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="fd" value="${esc(pre.date || t)}" max="${t}"></div>
         <div class="field"><label class="lbl">${L('Masa sebenar', 'Actual time')}</label><input class="input" type="time" id="ft"></div>
       </div>
       <div class="field"><label class="lbl">${L('Jenis punch', 'Punch type')}</label>
@@ -858,20 +936,25 @@ function fixForm() {
   });
 }
 
-function claimForm() {
+function claimForm(pre = {}) {
   const t = todayStr();
   let rcpt = null;
-  const cats = [L('Minyak', 'Fuel'), L('Tol', 'Toll'), L('Parkir', 'Parking'), L('Makan', 'Meals'), L('Pengangkutan', 'Transport'), L('Lain-lain', 'Others')];
+  const rate = Number(S.company.settings?.mileageRate || 0);
+  const MILE = L('Perbatuan (km)', 'Mileage (km)');
+  const cats = [MILE, L('Minyak', 'Fuel'), L('Tol', 'Toll'), L('Parkir', 'Parking'), L('Makan', 'Meals'), L('Pengangkutan', 'Transport'), L('Lain-lain', 'Others')];
   const m = modal({
     title: L('Tuntutan', 'Claim'),
     body: `
       <div class="grid2">
-        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="cd" value="${t}" max="${t}"></div>
+        <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="cd" value="${esc(pre.date || t)}" max="${t}"></div>
+        <div class="field"><label class="lbl">${L('Kategori', 'Category')}</label>
+          <select class="input" id="cc">${cats.map(c => `<option ${c === (pre.cat || '') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid2">
+        <div class="field" id="kmF"><label class="lbl">${L('Jarak (km)', 'Distance (km)')}${rate ? ` · RM${rate}/km` : ''}</label><input class="input" type="number" step="0.1" min="0" id="ck" inputmode="decimal"></div>
         <div class="field"><label class="lbl">${L('Jumlah (RM)', 'Amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="ca" inputmode="decimal"></div>
       </div>
-      <div class="field"><label class="lbl">${L('Kategori', 'Category')}</label>
-        <select class="input" id="cc">${cats.map(c => `<option>${esc(c)}</option>`).join('')}</select></div>
-      <div class="field"><label class="lbl">${L('Keterangan', 'Description')}</label><textarea class="input" id="cr" maxlength="500" style="min-height:60px"></textarea></div>
+      <div class="field"><label class="lbl">${L('Keterangan', 'Description')}</label><textarea class="input" id="cr" maxlength="500" style="min-height:60px">${esc(pre.desc || '')}</textarea></div>
       <div class="field"><label class="lbl">${L('Gambar resit', 'Receipt photo')}</label>
         <input class="input" type="file" accept="image/*" id="cf"><div id="cfPrev" style="margin-top:.4rem"></div></div>`,
     actions: [
@@ -880,7 +963,8 @@ function claimForm() {
         label: L('Hantar', 'Submit'), cls: 'btn-primary', onClick: async ({ el }) => {
           const amount = Number($('#ca', el).value || 0), date = $('#cd', el).value;
           if (!(amount > 0) || !date) { toast(L('Sila isi tarikh dan jumlah.', 'Please fill in date and amount.'), 'warn'); return false; }
-          try { await submitReq({ kind: 'claim', date, amount, category: $('#cc', el).value, reason: $('#cr', el).value.trim(), attachment: rcpt }); }
+          const km = $('#cc', el).value === MILE ? Number($('#ck', el).value || 0) : 0;
+          try { await submitReq({ kind: 'claim', date, amount, km, category: $('#cc', el).value, reason: $('#cr', el).value.trim(), attachment: rcpt }); }
           catch (e) { toast(authErr(e), 'bad'); return false; }
         }
       }
@@ -891,6 +975,9 @@ function claimForm() {
     try { rcpt = await fileToDataURL(f, 900, 'image/jpeg', 0.6); $('#cfPrev', m.el).innerHTML = `<img src="${rcpt}" style="max-width:120px;border-radius:8px">`; }
     catch { toast(L('Gagal membaca imej.', 'Failed to read image.'), 'bad'); }
   };
+  const syncKm = () => { $('#kmF', m.el).style.display = $('#cc', m.el).value === MILE ? '' : 'none'; };
+  $('#cc', m.el).onchange = syncKm; syncKm();
+  $('#ck', m.el).oninput = () => { if (rate) $('#ca', m.el).value = (Number($('#ck', m.el).value || 0) * rate).toFixed(2); };
 }
 
 function swapForm() {
