@@ -1232,11 +1232,7 @@ function viewSettings() {
       <div class="field"><label class="lbl">Mileage (RM/km)</label><input class="input" type="number" step="0.01" min="0" id="crKm" value="${claimRates(c).km}"></div>
       <div class="field"><label class="lbl">Outstation (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOut" value="${claimRates(c).outstation}"></div>
       <div class="field"><label class="lbl">Overnight (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOver" value="${claimRates(c).overnight}"></div>
-      <div class="field"><label class="lbl">${L('Elaun A — nama', 'Allowance A — name')}</label><input class="input" id="crA1n" value="${esc(claimRates(c).a1Name)}"></div>
-      <div class="field"><label class="lbl">${L('Elaun A — RM', 'Allowance A — RM')}</label><input class="input" type="number" step="0.01" min="0" id="crA1" value="${claimRates(c).a1Rate}"></div>
       <div class="field"><label class="lbl">Mileage allowance offset (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOff" value="${claimRates(c).offset}"></div>
-      <div class="field"><label class="lbl">${L('Elaun B — nama', 'Allowance B — name')}</label><input class="input" id="crA2n" value="${esc(claimRates(c).a2Name)}"></div>
-      <div class="field"><label class="lbl">${L('Elaun B — RM', 'Allowance B — RM')}</label><input class="input" type="number" step="0.01" min="0" id="crA2" value="${claimRates(c).a2Rate}"></div>
       <div class="field"><label class="lbl">SST (%)</label><input class="input" type="number" step="0.1" min="0" id="crSst" value="${claimRates(c).sst}"></div>
     </div>
     <button class="btn btn-primary btn-sm" id="crSave">${L('Simpan Kadar', 'Save Rates')}</button>
@@ -1397,7 +1393,7 @@ function viewSettings() {
     const v = (id) => Number($('#' + id).value || 0);
     busy(e.currentTarget, true);
     try {
-      await updateDoc(cRef(), { claimRates: { km: v('crKm'), outstation: v('crOut'), overnight: v('crOver'), a1Name: $('#crA1n').value.trim() || 'Allowance A', a1Rate: v('crA1'), a2Name: $('#crA2n').value.trim() || 'Allowance B', a2Rate: v('crA2'), offset: v('crOff'), sst: v('crSst') } });
+      await updateDoc(cRef(), { claimRates: { km: v('crKm'), outstation: v('crOut'), overnight: v('crOver'), offset: v('crOff'), sst: v('crSst') } });
       logAct('settings.claimRates'); toast(L('Kadar disimpan.', 'Rates saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }
     finally { busy(e.currentTarget, false); }
@@ -2703,20 +2699,20 @@ async function seedDemo(btn) {
     ops.push(b => b.set(doc(db, 'companies', S.cid, 'claims', `${workers[0].id}_${mo}`), {
       uid: uidOf(workers[0]), workerId: workers[0].id, name: workers[0].name, month: mo, status: 'submitted', submittedAt: serverTimestamp(), demo: true,
       journeys: [
-        { date: dd(3), route: 'Puchong - Sepang - Puchong', project: PJ[0], km: 86, toll: 7.4, parking: 0, others: 0, outstation: 0, overnight: 0, a1: 1, a2: 0, remarks: L('Pasang logger', 'Install logger') },
-        { date: dd(5), route: 'Puchong - Kuantan', project: PJ[0], km: 250, toll: 32.5, parking: 6, others: 0, outstation: 1, overnight: 1, a1: 1, a2: 0, remarks: L('Lawatan tapak', 'Site visit') },
-        { date: dd(6), route: 'Kuantan - Puchong', project: PJ[0], km: 250, toll: 32.5, parking: 0, others: 0, outstation: 1, overnight: 0, a1: 1, a2: 0, remarks: '' },
-        { date: dd(9), route: 'Puchong - Bandar Kinrara', project: PJ[1], km: 24, toll: 2.1, parking: 4, others: 0, outstation: 0, overnight: 0, a1: 0, a2: 1, remarks: L('Semak sensor', 'Check sensor') }],
+        { date: dd(3), route: 'Puchong - Sepang - Puchong', project: PJ[0], km: 86, toll: 7.4, parking: 0, outstation: 0, overnight: 0, remarks: L('Pasang logger', 'Install logger') },
+        { date: dd(5), route: 'Puchong - Kuantan', project: PJ[0], km: 250, toll: 32.5, parking: 6, outstation: 1, overnight: 1, remarks: L('Lawatan tapak', 'Site visit') },
+        { date: dd(6), route: 'Kuantan - Puchong', project: PJ[0], km: 250, toll: 32.5, parking: 0, outstation: 1, overnight: 0, remarks: '' },
+        { date: dd(9), route: 'Puchong - Bandar Kinrara', project: PJ[1], km: 24, toll: 2.1, parking: 4, outstation: 0, overnight: 0, remarks: L('Semak sensor', 'Check sensor') }],
       purchases: [
         { date: dd(5), supplier: 'Hotel Seri Malaysia', sstCode: '', invoice: 'INV-88213', cat: 'LODGING', amount: 120, sst: 9.6, project: PJ[0] },
         { date: dd(5), supplier: 'Restoran Pak Su', sstCode: '', invoice: 'R-1022', cat: 'FOOD AND BEVERAGES', amount: 38.5, sst: 0, project: PJ[0] },
         { date: dd(9), supplier: 'Mr DIY', sstCode: 'W10-1808-32000123', invoice: 'MD-55190', cat: 'TOOLS', amount: 46.3, sst: 3.7, project: PJ[1] }],
-      allowances: [], advance: 100, otherDetails: ''
+      allowances: [], otherDetails: ''
     }));
     ops.push(b => b.set(doc(db, 'companies', S.cid, 'claims', `${workers[4].id}_${mo}`), {
       uid: uidOf(workers[4]), workerId: workers[4].id, name: workers[4].name, month: mo, status: 'approved', submittedAt: serverTimestamp(), approvedBy: 'Demo Admin', approvedAt: t.split('-').reverse().join('/'), demo: true,
-      journeys: [{ date: dd(2), route: 'Puchong - Klang - Puchong', project: PJ[1], km: 60, toll: 4.2, parking: 3, others: 0, outstation: 0, overnight: 0, a1: 0, a2: 1, remarks: '' }],
-      purchases: [], allowances: [], advance: 0, otherDetails: ''
+      journeys: [{ date: dd(2), route: 'Puchong - Klang - Puchong', project: PJ[1], km: 60, toll: 4.2, parking: 3, outstation: 0, overnight: 0, remarks: '' }],
+      purchases: [], allowances: [], otherDetails: ''
     }));
     if (!(S.company.projects || []).length) ops.push(b => b.update(cRef(), { projects: PJ }));
     R(workers[3], { kind: 'advance', date: addDays(t, -5), amount: 200, approvedAmount: 200, reason: L('Kecemasan', 'Emergency'), status: 'approved' });
@@ -2824,8 +2820,8 @@ async function viewClaims() {
   $('#clF').onchange = draw;
   $('#clX').onclick = () => {
     if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
-    const aoa = [[S.company.name], [`Claims ${S.clMonth}`], [], ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/Overnight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total Expenses', 'Less Advance', 'Balance Due', 'Total (Allowance)', 'Claim Reimbursement', 'Approved by', 'Paid ref']];
-    list.forEach(x => { const X = computeClaim(x, S.company); aoa.push([x.workerId, x.name, x.status, X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others, X.totalExpenses, X.advance, X.balanceDue, X.allowanceTotal, X.reimbursement, x.approvedBy || '', x.paidRef || '']); });
+    const aoa = [[S.company.name], [`Claims ${S.clMonth}`], [], ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/Overnight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total Expenses', 'Total (Allowance)', 'Claim Reimbursement', 'Approved by', 'Paid ref']];
+    list.forEach(x => { const X = computeClaim(x, S.company); aoa.push([x.workerId, x.name, x.status, X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others, X.totalExpenses, X.allowanceTotal, X.reimbursement, x.approvedBy || '', x.paidRef || '']); });
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), S.clMonth);
     XLSX.writeFile(wb, `Claims_${S.company.code}_${S.clMonth}.xlsx`);
   };
@@ -2855,8 +2851,7 @@ function openClaimAdmin(cl, after) {
         <tr><td>MILEAGE ALLOWANCE OFFSET</td><td class="right">${X.offset ? (-X.offset).toFixed(2) : '0.00'}</td><td colspan="11"></td></tr></tbody></table></div>
       <div class="grid2" style="margin-top:.6rem"><div>
         <div class="set-row"><span>Total Expenses</span><b>${money(X.totalExpenses)}</b></div>
-        <div class="set-row"><span>Less Advance</span><b>${money(X.advance)}</b></div>
-        <div class="set-row"><span>Balance Due</span><b>${money(X.balanceDue)}</b></div></div><div>
+</div><div>
         <div class="set-row"><span>Total (Allowance)</span><b>${money(X.allowanceTotal)}</b></div>
         <div class="set-row"><span>Total (Claim)</span><b>${money(X.claimTotal)}</b></div>
         <div class="set-row"><span><b>Claim Reimbursement</b></span><b style="color:var(--gold)">${money(X.reimbursement)}</b></div></div></div>

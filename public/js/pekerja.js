@@ -952,7 +952,7 @@ async function saveClaim(cl, status) {
     uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, month: cl.month,
     status: status || (cl.status === 'rejected' ? 'draft' : (cl.status || 'draft')),
     journeys: cl.journeys || [], purchases: cl.purchases || [], allowances: cl.allowances || [],
-    advance: Number(cl.advance || 0), otherDetails: cl.otherDetails || '', updatedAt: serverTimestamp(),
+    otherDetails: cl.otherDetails || '', updatedAt: serverTimestamp(),
     ...(status === 'submitted' ? { submittedAt: serverTimestamp(), adminNote: '' } : {})
   };
   await setDoc(doc(db, 'companies', S.cid, 'claims', claimId(cl.month)), data, { merge: true });
@@ -1009,9 +1009,9 @@ function claimEditor(month, tab = 'j') {
     const body = $('#ctBody', el);
     const addBtn = (id, label) => ed ? `<button class="btn btn-plus" id="${id}" style="margin-top:.6rem">${icon('plus', 16)} ${label}</button>` : '';
     if (t === 'j') {
-      body.innerHTML = `<p class="xs muted">EXPENSES CLAIM JUSTIFICATION FORM · RM${R.km}/km · Outstation RM${R.outstation} · Overnight RM${R.overnight} · ${esc(R.a1Name)} RM${R.a1Rate} · ${esc(R.a2Name)} RM${R.a2Rate}</p>
+      body.innerHTML = `<p class="xs muted">EXPENSES CLAIM JUSTIFICATION FORM · RM${R.km}/km · Outstation RM${R.outstation} · Overnight RM${R.overnight}</p>
         ${J.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Perjalanan / Tujuan', 'Journey / Purpose')}</th><th class="right">km</th><th class="right">${L('Tol', 'Toll')}</th><th class="right">${L('Parkir', 'Park')}</th><th class="right">RM</th><th></th></tr></thead><tbody>
-          ${J.map((j, i) => `<tr><td class="small">${fmtDate(j.date, { day: 'numeric', month: 'short' })}</td><td><b>${esc(j.route || '-')}</b><div class="xs muted">${esc(j.project || '')}${j.outstation ? ` · Outst ${j.outstation}` : ''}${j.overnight ? ` · Overn ${j.overnight}` : ''}${j.a1 ? ` · ${esc(R.a1Name)} ${j.a1}` : ''}${j.a2 ? ` · ${esc(R.a2Name)} ${j.a2}` : ''}</div></td>
+          ${J.map((j, i) => `<tr><td class="small">${fmtDate(j.date, { day: 'numeric', month: 'short' })}</td><td><b>${esc(j.route || '-')}</b><div class="xs muted">${esc(j.project || '')}${j.outstation ? ` · Outst ${j.outstation}` : ''}${j.overnight ? ` · Overn ${j.overnight}` : ''}</div></td>
             <td class="right">${j.km || ''}</td><td class="right">${j.toll ? Number(j.toll).toFixed(2) : ''}</td><td class="right">${j.parking ? Number(j.parking).toFixed(2) : ''}</td><td class="right bold">${journeyTotal(j, R).toFixed(2)}</td>
             <td style="white-space:nowrap">${ed ? `<button class="icon-btn" data-je="${i}">✎</button><button class="icon-btn" data-jd="${i}">✕</button>` : ''}</td></tr>`).join('')}</tbody>
           <tfoot><tr><th colspan="5">${L('Jumlah', 'Total')}${X.kmTotal > 0 ? ` (${L('tolak', 'less')} RM${R.offset} offset)` : ''}</th><th class="right">${X.justTotal.toFixed(2)}</th><th></th></tr></tfoot></table></div>`
@@ -1040,7 +1040,7 @@ function claimEditor(month, tab = 'j') {
     } else if (t === 'a') {
       body.innerHTML = `<p class="xs muted">ALLOWANCE CLAIM FORM · Outstation × RM${R.outstation} · Overnight × RM${R.overnight}</p>
         ${A.length ? `<div class="table-wrap"><table><thead><tr><th>No</th><th>${L('Butiran', 'Details')}</th><th class="right">RM</th><th></th></tr></thead><tbody>
-          ${A.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.details || '-')}</b><div class="xs muted">${a.project ? 'Project RM' + a.project + ' · ' : ''}${a.outstation ? 'Outst ' + a.outstation + ' · ' : ''}${a.overnight ? 'Overn ' + a.overnight + ' · ' : ''}${a.a1 ? esc(R.a1Name) + ' RM' + a.a1 + ' · ' : ''}${a.a2 ? esc(R.a2Name) + ' RM' + a.a2 : ''}</div></td>
+          ${A.map((a, i) => `<tr><td>${i + 1}</td><td><b>${esc(a.details || '-')}</b><div class="xs muted">${a.project ? 'Project RM' + a.project + ' · ' : ''}${a.outstation ? 'Outst ' + a.outstation + ' · ' : ''}${a.overnight ? 'Overn ' + a.overnight : ''}</div></td>
             <td class="right bold">${allowanceTotal(a, R).toFixed(2)}</td><td style="white-space:nowrap">${ed ? `<button class="icon-btn" data-ae="${i}">✎</button><button class="icon-btn" data-ad="${i}">✕</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
           : `<div class="empty small">${L('Tiada elaun.', 'No allowances.')}</div>`}
         ${addBtn('aAdd', L('Tambah elaun', 'Add allowance'))}`;
@@ -1055,14 +1055,12 @@ function claimEditor(month, tab = 'j') {
           <tr><td>MILEAGE ALLOWANCE OFFSET</td><td class="right">${X.offset ? (-X.offset).toFixed(2) : '0.00'}</td><td colspan="5"></td></tr></tbody></table></div>
           <p class="xs muted">* ${L('Lodging, parking, F&B, tools, stationery, medical & others — lihat dokumen penuh.', 'Lodging, parking, F&B, tools, stationery, medical & others — see full document.')}</p>` : `<div class="empty small">-</div>`}
         <div class="set-row"><span>Total Expenses</span><b>${money(X.totalExpenses)}</b></div>
-        <div class="set-row"><span>Less Advance</span>${ed ? `<input class="input" type="number" step="0.01" min="0" id="cAdv" value="${cl.advance || ''}" style="max-width:130px">` : `<b>${money(X.advance)}</b>`}</div>
-        <div class="set-row"><span><b>Balance Due</b></span><b>${money(X.balanceDue)}</b></div>
         <div class="set-row"><span>Total (Allowance)</span><b>${money(X.allowanceTotal)}</b></div>
         <div class="set-row"><span><b>Claim Reimbursement</b></span><b style="color:var(--gold);font-size:1.2rem">${money(X.reimbursement)}</b></div>
         <div class="field" style="margin-top:.6rem"><label class="lbl">Details for others claims</label>${ed ? `<textarea class="input" id="cOth" maxlength="400" style="min-height:60px">${esc(cl.otherDetails || '')}</textarea>` : `<div>${esc(cl.otherDetails || '-')}</div>`}</div>
         ${ed ? `<button class="btn btn-soft" id="cSaveS">${L('Simpan', 'Save')}</button>` : ''}`;
       $('#cSaveS', el) && ($('#cSaveS', el).onclick = async () => {
-        cl.advance = Number($('#cAdv', el).value || 0); cl.otherDetails = $('#cOth', el).value.trim();
+        cl.otherDetails = $('#cOth', el).value.trim();
         try { await saveClaim(cl); toast(L('Disimpan.', 'Saved.')); m.close(); claimEditor(month, 's'); } catch (e) { toast(authErr(e), 'bad'); }
       });
     }
@@ -1083,8 +1081,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
       </div>
       <div class="field"><label class="lbl">Journey From/To</label><input class="input" id="jr" maxlength="150" value="${esc(j.route || '')}" placeholder="${L('cth: Pejabat Puchong → Tapak Kundang → Pejabat', 'e.g. Puchong office → Kundang site → office')}"></div>
       <div class="grid3">${f('km', `Mileage (km) × RM${R.km}`, '0.1')}${f('toll', 'Toll (RM)')}${f('parking', 'Parking (RM)')}</div>
-      <div class="grid3">${f('others', 'Others (RM)')}${f('outstation', `Outstation × RM${R.outstation}`, '1')}${f('overnight', `Overnight × RM${R.overnight}`, '1')}</div>
-      <div class="grid2">${f('a1', `${esc(R.a1Name)} × RM${R.a1Rate}`, '1')}${f('a2', `${esc(R.a2Name)} × RM${R.a2Rate}`, '1')}</div>
+      <div class="grid2">${f('outstation', `Outstation × RM${R.outstation}`, '1')}${f('overnight', `Overnight × RM${R.overnight}`, '1')}</div>
       <div class="field"><label class="lbl">Remarks</label><input class="input" id="jm" maxlength="200" value="${esc(j.remarks || '')}"></div>
       <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>Total (RM)</b><b id="jt" style="color:var(--gold);font-size:1.2rem">0.00</b></div></div>`,
     actions: [
@@ -1182,8 +1179,7 @@ function allowanceForm(cl, a = {}, idx = null, after) {
     title: L('Elaun (Allowance Claim Form)', 'Allowance (Allowance Claim Form)'),
     body: `<div class="field"><label class="lbl">Expenses Details</label><input class="input" id="ad" maxlength="150" value="${esc(a.details || '')}"></div>
       <div class="grid2">${f('project', 'Project Allowance (RM)')}${f('outstation', `Outstation (${L('hari', 'days')}) × RM${R.outstation}`, '1')}</div>
-      <div class="grid2">${f('overnight', `Overnight (${L('malam', 'nights')}) × RM${R.overnight}`, '1')}${f('a1', `${esc(R.a1Name)} Allowance (RM)`)}</div>
-      <div class="grid2">${f('a2', `${esc(R.a2Name)} Allowance (RM)`)}</div>
+      <div class="grid2">${f('overnight', `Overnight (${L('malam', 'nights')}) × RM${R.overnight}`, '1')}</div>
       <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>Total (RM)</b><b id="at" style="color:var(--gold);font-size:1.2rem">0.00</b></div></div>`,
     actions: [
       { label: L('Batal', 'Cancel'), onClick: () => { after && setTimeout(after, 60); } },
