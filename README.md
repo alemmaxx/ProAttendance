@@ -88,3 +88,35 @@ Then go to **Pakej & Harga** and set the trial length and the prices.
 - Lock & Publish: payslips reach workers, claims and advances are marked paid, and "one-time" items are removed
 - Payslips as PDF (print) with the company logo, a bulk print of all slips, Excel export, and a bank file (CSV)
 - Workers: claims (with receipt photo), salary advances, and their payslips in the Profil tab
+
+## Phase 4 (F4) — done
+- **Kiosk mode** (`/kiosk.html`): one tablet at the entrance; workers punch with ID + PIN or by scanning their QR staff card
+- **Offline**: punches are kept on the phone and sent automatically once the internet is back (using the phone's time)
+- **Extra admins**: Manager / Supervisor (Settings → Admins & Supervisors)
+- **Change log** for every important admin action, plus **backup** (download all data as JSON)
+- **Promo codes** (add days / % discount, single-use) and a **promo kit** in Super Admin
+- **Landing page** (`/landing.html`) for TikTok/FB, with pricing pulled from Super Admin and a WhatsApp sales button
+- WhatsApp sharing of the daily attendance summary from the dashboard
+- **Support mode**: Super Admin → Companies → **Open** goes into any company
+
+## Phase 5 (F5) — done
+- **HR file** per worker: documents (with expiry reminders), warnings, performance reviews, assets, loans (instalments deducted automatically from pay), onboarding checklist, resignation
+- **Daily tasks** (admin assigns, worker marks done with a photo)
+- **Site visits** for field workers (GPS + photo; switch it on in Settings)
+- **Shift swaps** between workers (admin approval, roster updated automatically)
+- **Polls** in announcements
+- Dashboard: 14-day chart, best attendance of the month, 14-day staffing forecast, birthdays, work anniversaries, documents about to expire
+- Payroll: perfect-attendance bonus, labour cost by location, **yearly summary to help fill in the EA form**
+- Printable digital staff cards with QR codes
+- **Multiple companies** under one owner (switch from the sidebar)
+
+## Phase 6 (F6) — done
+- **Agents / resellers**: each agent gets a link `landing.html?ref=CODE`; sign-ups and sales are tracked per agent, with commission
+- **Push notifications** (optional): new requests → admin; approve/reject, announcements, tasks → worker
+  - To turn them on: Firebase Console → Project settings → Cloud Messaging → Web Push certificates → **Generate key pair**, then paste the key into `VAPID_KEY` in `public/js/config.js`
+- **APK for Google Play**: PNG icons and the manifest are ready. Easiest path: go to https://www.pwabuilder.com, enter `https://proattendancemy.web.app`, choose **Android → Generate**, then upload the `.aab` to Play Console. PWABuilder gives you an `assetlinks.json` file — put it in `public/.well-known/assetlinks.json` and deploy.
+- Integration with Pro POS / ProBurger: not done yet (it needs the code of both apps)
+
+## Notes for the first deploy after F4–F6
+- The first deploy of the new functions (notification triggers) can sometimes fail with a "permission propagating" error. Wait 2–3 minutes, then press deploy.bat again.
+- From F4 onwards, selfies are stored separately (`selfies`) so that reports stay light. Old punches still show their selfies as before.

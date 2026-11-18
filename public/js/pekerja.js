@@ -4,18 +4,19 @@ import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  doc, getDoc, getDocs, updateDoc, addDoc, collection, query, where, orderBy, limit, serverTimestamp
+  doc, getDoc, getDocs, updateDoc, addDoc, setDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
   summarizeDay, TYPE_LABEL, METHOD_LABEL, haversine, getPosition, getDeviceId, takeSelfie, scanQR, verifyQr,
-  applyBrand, logoHtml, isExpired, authErr, icon, fileToDataURL
+  applyBrand, logoHtml, isExpired, authErr, icon, fileToDataURL, punchTime
 } from './ui.js';
 import {
   leaveTypes, leaveTypeName, resolveDay, lateSettings, shiftLabel, loadRoster, countLeaveDays, leaveBalances,
   leaveDateMap, holidayMap, otKind, OT_LABEL, REQ_LABEL, STATUS_BADGE, hoursBetween
 } from './sched.js';
 import { payslipHtml, openPrint, periodLabel } from './payroll.js';
+import { pushAvailable, enablePush, refreshPush } from './push.js';
 import { money } from './ui.js';
 
 const app = $('#app');
@@ -139,6 +140,7 @@ onAuthStateChanged(auth, async (u) => {
 
     await Promise.all([loadToday(), loadMeta()]);
     renderShell();
+    refreshPush(S.cid, S.user.uid, { role: 'worker', workerId: S.me.workerId });
     if (S.worker.mustChangePin) forcePinChange();
   } catch (err) {
     console.error(err);
@@ -188,7 +190,7 @@ function pinModal(force) {
 const forcePinChange = () => pinModal(true);
 
 // ---------------------------------------------------------------- DATA
-const sortTs = (a, b) => (toDate(a.ts)?.getTime() || 0) - (toDate(b.ts)?.getTime() || 0);
+const sortTs = (a, b) => (punchTime(a)?.getTime() || 0) - (punchTime(b)?.getTime() || 0);
 
 // Sesi kerja semasa: hari ini, atau semalam jika syif semalam masih terbuka (syif malam)
 async function loadToday() {
@@ -196,7 +198,9 @@ async function loadToday() {
   const q = query(collection(db, 'companies', S.cid, 'attendance'),
     where('uid', '==', S.user.uid), where('date', '>=', y), where('date', '<=', t));
   const s = await getDocs(q);
-  const recs = s.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).sort(sortTs);
+  const all = s.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).sort(sortTs);
+  S.visits = all.filter(r => r.type === 'visit' && r.date === t);
+  const recs = all.filter(r => r.type !== 'visit');
   const tRecs = recs.filter(r => r.date === t), yRecs = recs.filter(r => r.date === y);
   const yLast = yRecs[yRecs.length - 1];
   const yOpen = yLast && yLast.type !== 'out' && (Date.now() - (toDate(yRecs.find(r => r.type === 'in')?.ts)?.getTime() || 0)) < 16 * 3600000;
@@ -289,6 +293,7 @@ function viewHome() {
     ${S.sessionDate !== todayStr() ? `<p class="small" style="color:var(--warn);margin-top:.4rem">${L('Syif semalam masih terbuka', "Yesterday's shift is still open")} (${fmtDate(S.sessionDate)})</p>` : ''}
     <button class="punch-btn ${cls}" id="mainBtn">${icon(ico, 34)}<span>${TYPE_LABEL[main]()}</span></button>
     ${alt.map(a => `<button class="btn btn-ghost" data-alt="${a}">${TYPE_LABEL[a]()}</button>`).join('')}
+    ${S.company.settings?.visits ? `<button class="btn btn-ghost" id="visitBtn">${icon('pin', 16)} ${L('Lawatan Tapak', 'Site Visit')}${S.visits?.length ? ` (${S.visits.length})` : ''}</button>` : ''}
     <p class="small muted" style="margin-top:.8rem">
       ${icon('pin', 15)} ${loc ? esc(loc.name) + ' · ' + METHOD_LABEL[loc.mode || 'button']() : (S.locations.length ? L('Pilih lokasi semasa punch', 'Choose location when punching') : L('Tiada lokasi ditetapkan', 'No location set'))}
     </p>
@@ -302,10 +307,11 @@ function viewHome() {
   <div class="card">
     <h3>${L('Aktiviti hari ini', "Today's activity")}</h3>
     ${S.today.length ? `<ul class="timeline">${S.today.map(r => `
-      <li><span class="dot d-${r.type}"></span><b>${fmtTime(r.ts)}</b><span class="grow">${TYPE_LABEL[r.type]()}</span>
-      <span class="badge">${esc(r.locName || METHOD_LABEL[r.method || 'button']())}</span></li>`).join('')}</ul>`
+      <li><span class="dot d-${r.type}"></span><b>${fmtTime(punchTime(r))}</b><span class="grow">${TYPE_LABEL[r.type]?.() || r.type}${r.offline ? ' <span class="badge b-warn">offline</span>' : ''}</span>
+      <span class="badge">${esc(r.locName || METHOD_LABEL[r.method || 'button']?.() || '')}</span></li>`).join('')}</ul>`
       : `<div class="empty small">${L('Belum ada rekod hari ini.', 'No records yet today.')}</div>`}
   </div>
+  <div id="taskCard"></div>
   ${upcomingHtml()}`;
   const tick = () => {
     const d = new Date();
@@ -315,6 +321,8 @@ function viewHome() {
   };
   tick(); S.clockT = setInterval(tick, 1000);
   $('#mainBtn').onclick = (e) => punch(main, e.currentTarget);
+  $('#visitBtn') && ($('#visitBtn').onclick = visitForm);
+  loadTasks();
   $$('[data-alt]').forEach(b => b.onclick = (e) => punch(b.dataset.alt, e.currentTarget));
 }
 
@@ -401,12 +409,13 @@ async function punch(type, btn) {
       ts: serverTimestamp(), date: type === 'in' ? todayStr() : S.sessionDate,
       lid: loc?.id || null, locName: loc?.name || '', method: mode,
       lat: pos?.lat ?? null, lng: pos?.lng ?? null, acc: pos?.acc ?? null, dist,
-      selfie, deviceId: getDeviceId(), dept: S.worker.dept || ''
+      selfie: null, hasSelfie: !!selfie, deviceId: getDeviceId(), dept: S.worker.dept || ''
     };
-    await addDoc(collection(db, 'companies', S.cid, 'attendance'), rec);
+    await savePunch(rec, selfie);
     if (navigator.vibrate) navigator.vibrate(120);
-    toast(`${TYPE_LABEL[type]()} ✓ ${fmtTime(new Date())}`);
-    await loadToday();
+    toast(`${TYPE_LABEL[type]()} ✓ ${fmtTime(new Date())}${rec.offline ? ' · ' + L('disimpan, akan dihantar bila ada internet', 'saved, will sync when online') : ''}`, rec.offline ? 'warn' : 'ok', rec.offline ? 6000 : 3200);
+    if (rec.offline) { S.today.push({ ...rec, id: 'local' + Date.now() }); S.today.sort(sortTs); }
+    else await loadToday();
     if (S.tab === 'home') viewHome();
   } catch (e) {
     console.error(e);
@@ -414,6 +423,98 @@ async function punch(type, btn) {
       ? L('Punch ditolak. Akaun atau langganan syarikat mungkin tidak aktif.', 'Punch rejected. Account or company subscription may be inactive.')
       : authErr(e), 'bad', 5000);
   } finally { busy(btn, false); }
+}
+
+// Simpan punch (kehadiran + selfie). Jika tiada internet, simpan dalam peranti dan hantar kemudian.
+async function savePunch(rec, selfie) {
+  rec.clientTs = Date.now();
+  rec.offline = !navigator.onLine;
+  const ref = doc(collection(db, 'companies', S.cid, 'attendance'));
+  const b = writeBatch(db);
+  b.set(ref, rec);
+  if (selfie) b.set(doc(db, 'companies', S.cid, 'selfies', ref.id), { uid: S.user.uid, workerId: S.me.workerId, selfie, at: serverTimestamp() });
+  const p = b.commit();
+  if (rec.offline) { p.catch(() => {}); return ref.id; }
+  // Jika talian perlahan, jangan tunggu terlalu lama
+  const r = await Promise.race([p.then(() => 'ok'), new Promise(res => setTimeout(() => res('slow'), 12000))]);
+  if (r === 'slow') { rec.offline = true; }
+  return ref.id;
+}
+
+// ---------------------------------------------------------------- LAWATAN TAPAK
+function visitForm() {
+  let photo = null;
+  const m = modal({
+    title: L('Lawatan Tapak', 'Site Visit'),
+    body: `<p class="small muted">${L('Rekod lawatan ke tapak / pelanggan. Lokasi GPS direkod. Tidak menjejaskan jam kerja.', 'Record a visit to a site / client. GPS is recorded. Does not affect work hours.')}</p>
+      <div class="field"><label class="lbl">${L('Nama tapak / pelanggan', 'Site / client name')}</label><input class="input" id="vn" maxlength="100"></div>
+      <div class="field"><label class="lbl">${L('Catatan', 'Notes')}</label><textarea class="input" id="vt" maxlength="500" style="min-height:60px"></textarea></div>
+      <div class="field"><label class="lbl">${L('Gambar (pilihan)', 'Photo (optional)')}</label><input class="input" type="file" accept="image/*" capture="environment" id="vp"><div id="vpPrev"></div></div>`,
+    actions: [
+      { label: L('Batal', 'Cancel') },
+      {
+        label: L('Rekod', 'Record'), cls: 'btn-primary', onClick: async ({ el }) => {
+          const name = $('#vn', el).value.trim();
+          if (!name) { toast(L('Sila isi nama tapak.', 'Please enter the site name.'), 'warn'); return false; }
+          let pos = null; try { pos = await getPosition(12000); } catch {}
+          const rec = {
+            uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, type: 'visit', ts: serverTimestamp(), date: todayStr(),
+            lid: null, locName: name, method: 'gps', note: $('#vt', el).value.trim(),
+            lat: pos?.lat ?? null, lng: pos?.lng ?? null, acc: pos?.acc ?? null, dist: null,
+            selfie: null, hasSelfie: !!photo, deviceId: getDeviceId(), dept: S.worker.dept || ''
+          };
+          try { await savePunch(rec, photo); toast(L('Lawatan direkod.', 'Visit recorded.')); await loadToday(); viewHome(); }
+          catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
+  $('#vp', m.el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { photo = await fileToDataURL(f, 800, 'image/jpeg', 0.6); $('#vpPrev', m.el).innerHTML = `<img src="${photo}" style="max-width:120px;border-radius:8px;margin-top:.4rem">`; } catch {}
+  };
+}
+
+// ---------------------------------------------------------------- TUGASAN
+async function loadTasks() {
+  const box = $('#taskCard'); if (!box) return;
+  try {
+    const s = await getDocs(query(collection(db, 'companies', S.cid, 'tasks'), where('uid', '==', S.user.uid)));
+    const t = todayStr();
+    const list = s.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(x => (x.date || t) <= t && (x.status !== 'done' || x.date === t))
+      .sort((a, b) => (a.status === 'done') - (b.status === 'done') || (a.date || '').localeCompare(b.date || ''));
+    if (!list.length || !$('#taskCard')) return;
+    $('#taskCard').innerHTML = `<div class="card"><h3>${L('Tugasan', 'Tasks')}</h3>${list.map(x => `
+      <div class="set-row"><div><b style="${x.status === 'done' ? 'text-decoration:line-through;opacity:.6' : ''}">${esc(x.title)}</b>
+        ${x.note ? `<div class="small muted">${esc(x.note)}</div>` : ''}<div class="xs muted">${fmtDate(x.date)}</div></div>
+        ${x.status === 'done' ? `<span class="badge b-ok">${L('Siap', 'Done')}</span>` : `<button class="btn btn-sm btn-ok" data-task="${x.id}">${icon('check', 16)} ${L('Siap', 'Done')}</button>`}
+      </div>`).join('')}</div>`;
+    $$('[data-task]').forEach(b => b.onclick = () => taskDone(list.find(x => x.id === b.dataset.task)));
+  } catch { /* abaikan */ }
+}
+function taskDone(task) {
+  let photo = null;
+  const m = modal({
+    title: esc(task.title),
+    body: `<div class="field"><label class="lbl">${L('Catatan (pilihan)', 'Note (optional)')}</label><textarea class="input" id="tn" maxlength="300" style="min-height:60px"></textarea></div>
+      <div class="field"><label class="lbl">${L('Gambar kerja (pilihan)', 'Work photo (optional)')}</label><input class="input" type="file" accept="image/*" capture="environment" id="tp"><div id="tpPrev"></div></div>`,
+    actions: [
+      { label: L('Batal', 'Cancel') },
+      {
+        label: L('Tanda Siap', 'Mark Done'), cls: 'btn-ok', onClick: async ({ el }) => {
+          try {
+            await updateDoc(doc(db, 'companies', S.cid, 'tasks', task.id), { status: 'done', doneAt: serverTimestamp(), workerNote: $('#tn', el).value.trim(), photo });
+            toast(L('Tugasan siap.', 'Task done.')); loadTasks();
+          } catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
+  $('#tp', m.el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { photo = await fileToDataURL(f, 800, 'image/jpeg', 0.6); $('#tpPrev', m.el).innerHTML = `<img src="${photo}" style="max-width:120px;border-radius:8px;margin-top:.4rem">`; } catch {}
+  };
 }
 
 // ---------------------------------------------------------------- REKOD
@@ -499,6 +600,7 @@ function viewMohon() {
       <button class="btn btn-soft btn-block" id="rqFix">${icon('check', 18)} ${L('Betulkan Punch (terlupa punch)', 'Fix Punch (forgot to punch)')}</button>
       <button class="btn btn-soft btn-block" id="rqClaim">${icon('money', 18)} ${L('Tuntutan (minyak, tol, dll.)', 'Claim (fuel, toll, etc.)')}</button>
       <button class="btn btn-soft btn-block" id="rqAdv">${icon('card', 18)} ${L('Pendahuluan Gaji', 'Salary Advance')}</button>
+      <button class="btn btn-soft btn-block" id="rqSwap">${icon('users', 18)} ${L('Tukar Syif dengan Rakan', 'Swap Shift with Colleague')}</button>
     </div>
   </div>
   <div class="card">
@@ -510,6 +612,7 @@ function viewMohon() {
   $('#rqFix').onclick = fixForm;
   $('#rqClaim').onclick = claimForm;
   $('#rqAdv').onclick = advanceForm;
+  $('#rqSwap').onclick = swapForm;
   bindCancel();
 }
 
@@ -517,6 +620,7 @@ function reqDetail(r) {
   if (r.kind === 'leave') return `${esc(r.typeName || leaveTypeName(S.company, r.typeId))} · ${fmtDate(r.from)}${r.to && r.to !== r.from ? ' – ' + fmtDate(r.to) : ''} · ${r.days} ${L('hari', 'day(s)')}${r.half ? ' (' + (r.half === 'am' ? L('pagi', 'AM') : L('petang', 'PM')) + ')' : ''}`;
   if (r.kind === 'ot') return `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · ${r.approvedHours ?? r.hours} ${L('jam', 'hrs')}`;
   if (r.kind === 'claim') return `${esc(r.category || '')} · ${fmtDate(r.date)} · ${money(r.approvedAmount ?? r.amount)}${r.paidPeriod ? ' · ' + L('dibayar', 'paid') + ' ' + esc(r.paidPeriod) : ''}`;
+  if (r.kind === 'swap') return `${fmtDate(r.date)} · ${L('dengan', 'with')} ${esc(r.withId)}`;
   if (r.kind === 'advance') return `${money(r.approvedAmount ?? r.amount)} · ${fmtDate(r.date)}${r.paidPeriod ? ' · ' + L('dipotong', 'deducted') + ' ' + esc(r.paidPeriod) : ''}`;
   return `${fmtDate(r.date)} · ${TYPE_LABEL[r.type]?.() || r.type} ${esc(r.time)}`;
 }
@@ -714,6 +818,28 @@ function claimForm() {
   };
 }
 
+function swapForm() {
+  const t = todayStr();
+  modal({
+    title: L('Tukar Syif', 'Swap Shift'),
+    body: `<p class="small muted">${L('Tukar syif anda pada tarikh tersebut dengan syif rakan sekerja. Majikan perlu luluskan.', 'Swap your shift on that date with a colleague’s shift. Employer approval needed.')}</p>
+      <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="sd" min="${t}" value="${t}"></div>
+      <div class="field"><label class="lbl">${L('ID pekerja rakan', 'Colleague staff ID')}</label><input class="input id-input" id="sw" placeholder="${esc(S.me.workerId.replace(/\d+$/, ''))}002"></div>
+      <div class="field"><label class="lbl">${L('Sebab', 'Reason')}</label><textarea class="input" id="sr" maxlength="300" style="min-height:60px"></textarea></div>`,
+    actions: [
+      { label: L('Batal', 'Cancel') },
+      {
+        label: L('Hantar', 'Submit'), cls: 'btn-primary', onClick: async ({ el }) => {
+          const date = $('#sd', el).value, withId = $('#sw', el).value.trim().toUpperCase();
+          if (!date || !/^[A-Z]{2,6}\d+$/.test(withId) || withId === S.me.workerId) { toast(L('Sila isi tarikh dan ID rakan yang sah.', 'Please enter a date and a valid colleague ID.'), 'warn'); return false; }
+          try { await submitReq({ kind: 'swap', date, withId, reason: $('#sr', el).value.trim() }); }
+          catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }
+    ]
+  });
+}
+
 function advanceForm() {
   modal({
     title: L('Pendahuluan Gaji', 'Salary Advance'),
@@ -747,8 +873,20 @@ async function viewBerita() {
           <div class="day-box" style="padding:.5rem 0">${icon('bell', 20)}</div>
           <div class="grow"><div class="bold">${esc(a.title)}</div>
           <div class="small" style="white-space:pre-wrap">${esc(a.body)}</div>
+          ${(a.options || []).length ? `<div class="stack" style="margin-top:.5rem" data-poll="${d.id}">${a.options.map((o, i) => `<button class="btn btn-sm btn-ghost btn-block" data-opt="${i}">${esc(o)}</button>`).join('')}</div>` : ''}
           <div class="xs muted" style="margin-top:.3rem">${fmtDate(a.createdAt)}</div></div>
         </div>`; }).join('');
+    // Undian
+    $$('[data-poll]').forEach(async box => {
+      const aid = box.dataset.poll;
+      const mark = (i) => $$('[data-opt]', box).forEach(b => { b.classList.toggle('btn-primary', Number(b.dataset.opt) === i); b.classList.toggle('btn-ghost', Number(b.dataset.opt) !== i); });
+      try { const v = await getDoc(doc(db, 'companies', S.cid, 'announcements', aid, 'votes', S.user.uid)); if (v.exists()) mark(v.data().opt); } catch {}
+      $$('[data-opt]', box).forEach(b => b.onclick = async () => {
+        const opt = Number(b.dataset.opt);
+        try { await setDoc(doc(db, 'companies', S.cid, 'announcements', aid, 'votes', S.user.uid), { opt, workerId: S.me.workerId, at: serverTimestamp() }); mark(opt); toast(L('Undian direkod.', 'Vote recorded.')); }
+        catch (e) { toast(authErr(e), 'bad'); }
+      });
+    });
   } catch (e) { $('#nb').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -775,12 +913,22 @@ function viewProfil() {
   <div class="card"><h3>${L('Slip Gaji', 'Payslips')}</h3><div id="slips"><div class="loader" style="min-height:60px"><span class="spin"></span></div></div></div>
   <div class="card stack">
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
+    <button class="btn btn-ghost btn-block hide" id="pushB">${icon('bell', 18)} ${L('Hidupkan notifikasi', 'Turn on notifications')}</button>
     <button class="btn btn-ghost btn-block" id="chPin">${icon('shield', 18)} ${L('Tukar PIN', 'Change PIN')}</button>
     <button class="btn btn-ghost btn-block" id="langB">${L('Bahasa: Bahasa Melayu', 'Language: English')}</button>
     <button class="btn btn-danger btn-block" id="lo">${icon('out', 18)} ${L('Log Keluar', 'Log Out')}</button>
   </div>
   <p class="center xs muted" style="margin-top:1rem">ProAttendance</p>`;
   $('#chPin').onclick = () => pinModal(false);
+  pushAvailable().then(ok => {
+    const b = $('#pushB'); if (!ok || !b) return;
+    b.classList.remove('hide');
+    if (Notification.permission === 'granted') b.innerHTML = `${icon('check', 18)} ${L('Notifikasi aktif', 'Notifications on')}`;
+    b.onclick = async () => {
+      try { await enablePush(S.cid, S.user.uid, { role: 'worker', workerId: S.me.workerId }); toast(L('Notifikasi dihidupkan.', 'Notifications turned on.')); b.innerHTML = `${icon('check', 18)} ${L('Notifikasi aktif', 'Notifications on')}`; }
+      catch { toast(L('Notifikasi tidak dibenarkan. Benarkan dalam tetapan pelayar.', 'Notifications blocked. Allow them in browser settings.'), 'warn', 5000); }
+    };
+  });
   $('#langB').onclick = () => $('[data-lang-toggle]')?.click();
   $('#lo').onclick = () => signOut(auth);
   loadSlips();

@@ -113,6 +113,7 @@ export function toDate(ts) {
   if (ts.seconds) return new Date(ts.seconds * 1000);
   return null;
 }
+export const punchTime = (r) => (r?.offline && r.clientTs) ? new Date(r.clientTs) : toDate(r?.ts);
 export function fmtTime(ts) { const d = toDate(ts); return d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '-'; }
 export function fmtDate(x, opts) {
   const d = typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x) ? new Date(x + 'T00:00:00') : toDate(x);
@@ -132,7 +133,9 @@ export function addDays(str, n) { const d = new Date(str + 'T00:00:00'); d.setDa
 // ---------- Ringkasan kehadiran sehari ----------
 // recs: rekod seorang pekerja pada satu tarikh (type in/out/break_in/break_out, ts)
 export function summarizeDay(recs, settings = {}, dateStr) {
-  const list = [...recs].map(r => ({ ...r, _t: toDate(r.ts)?.getTime() || 0 })).sort((a, b) => a._t - b._t);
+  // Punch luar talian guna masa peranti (clientTs) kerana masa server ialah masa ia dihantar
+  const list = [...recs].map(r => ({ ...r, _t: (r.offline && r.clientTs ? r.clientTs : toDate(r.ts)?.getTime()) || 0 }))
+    .filter(r => r.type !== 'visit').sort((a, b) => a._t - b._t);
   let firstIn = null, lastOut = null, work = 0, brk = 0, inAt = null, brAt = null, onBreak = false;
   for (const r of list) {
     if (r.type === 'in') { if (!firstIn) firstIn = r._t; inAt = r._t; }
@@ -164,13 +167,15 @@ export const TYPE_LABEL = {
   in: () => L('Masuk', 'Clock In'),
   out: () => L('Keluar', 'Clock Out'),
   break_in: () => L('Mula Rehat', 'Break Start'),
-  break_out: () => L('Tamat Rehat', 'Break End')
+  break_out: () => L('Tamat Rehat', 'Break End'),
+  visit: () => L('Lawatan Tapak', 'Site Visit')
 };
 export const METHOD_LABEL = {
   button: () => L('Butang', 'Button'),
   gps: () => 'GPS',
   qr: () => 'QR',
-  fix: () => L('Pembetulan', 'Correction')
+  fix: () => L('Pembetulan', 'Correction'),
+  kiosk: () => 'Kiosk'
 };
 
 // ---------- Lokasi ----------

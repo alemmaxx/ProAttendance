@@ -4,11 +4,11 @@ import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  doc, getDoc, getDocs, setDoc, updateDoc, collection, query, orderBy, limit, serverTimestamp, Timestamp
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit, serverTimestamp, Timestamp, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, langBtn, fmtDate, fmtDateTime, toDate, isExpired, daysLeft,
-  money, authErr, icon, applyBrand
+  money, authErr, icon, applyBrand, copyText, todayStr
 } from './ui.js';
 
 const app = $('#app');
@@ -74,6 +74,9 @@ const NAV = () => [
   ['companies', 'building', L('Syarikat', 'Companies')],
   ['plans', 'money', L('Pakej & Harga', 'Plans & Pricing')],
   ['payments', 'card', L('Bayaran', 'Payments')],
+  ['promos', 'plus', L('Kod Promo', 'Promo Codes')],
+  ['agents', 'users', L('Agen / Reseller', 'Agents / Resellers')],
+  ['kit', 'chat', L('Kit Promosi', 'Promo Kit')],
   ['stats', 'chart', L('Statistik', 'Statistics')]
 ];
 
@@ -88,7 +91,8 @@ function renderShell() {
     </aside>
     <div class="side-bg" id="sideBg"></div>
     <div class="main">
-      <header class="topbar"><button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button><h1 id="vTitle"></h1></header>
+      <header class="topbar"><button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button><h1 id="vTitle"></h1>
+        <a class="btn btn-sm btn-soft" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Syarikat saya / Demo', 'My company / Demo')}</a></header>
       <div class="content" id="view"></div>
     </div>
   </div>`;
@@ -104,7 +108,7 @@ function go(v) {
   S.view = v;
   $$('.side nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $('#vTitle').textContent = NAV().find(n => n[0] === v)[2];
-  ({ companies: viewCompanies, plans: viewPlans, payments: viewPayments, stats: viewStats })[v]();
+  ({ companies: viewCompanies, plans: viewPlans, payments: viewPayments, stats: viewStats, promos: viewPromos, agents: viewAgents, kit: viewKit })[v]();
 }
 
 const loading = () => { $('#view').innerHTML = `<div class="loader" style="min-height:200px"><span class="spin"></span></div>`; };
@@ -145,7 +149,8 @@ async function viewCompanies() {
         <td>${c.workerCount || 0}</td>
         <td>${statusBadge(c)}</td>
         <td class="small">${fmtDate(c.expiry)}<div class="xs muted">${daysLeft(c)} ${L('hari', 'days')}</div></td>
-        <td class="right"><button class="btn btn-sm btn-ghost" data-c="${c.id}">${L('Urus', 'Manage')}</button></td></tr>`).join('')}</tbody></table></div>
+        <td class="right" style="white-space:nowrap"><a class="btn btn-sm btn-soft" href="/admin.html?cid=${c.id}" target="_blank">${L('Buka', 'Open')}</a>
+          <button class="btn btn-sm btn-ghost" data-c="${c.id}">${L('Urus', 'Manage')}</button></td></tr>`).join('')}</tbody></table></div>
       <p class="xs muted" style="margin-top:.5rem">${list.length} ${L('syarikat', 'companies')}</p>`
       : `<div class="empty">${L('Tiada syarikat.', 'No companies.')}</div>`;
     $$('[data-c]').forEach(b => b.onclick = () => manage(S.companies.find(c => c.id === b.dataset.c)));
@@ -208,6 +213,7 @@ async function viewPlans() {
       <div class="field"><label class="lbl">${L('Bulanan (RM)', 'Monthly (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="pm" value="${p.monthly ?? 0}"></div>
       <div class="field"><label class="lbl">${L('6 Bulan (RM)', '6 Months (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="p6" value="${p.sixMonth ?? 0}"></div>
       <div class="field"><label class="lbl">${L('Tahunan (RM)', 'Yearly (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="py" value="${p.yearly ?? 0}"></div>
+      <div class="field"><label class="lbl">${L('No. WhatsApp jualan (landing page)', 'Sales WhatsApp no. (landing page)')}</label><input class="input" id="pw" value="${esc(p.salesPhone || '')}" placeholder="60123456789"></div>
     </div>
     <button class="btn btn-primary" id="sv" style="margin-top:.8rem">${L('Simpan', 'Save')}</button>
   </div>`;
@@ -216,7 +222,7 @@ async function viewPlans() {
     try {
       await setDoc(doc(db, 'config', 'plans'), {
         trialDays: Math.round(Number($('#td').value || 0)), monthly: Number($('#pm').value || 0),
-        sixMonth: Number($('#p6').value || 0), yearly: Number($('#py').value || 0)
+        sixMonth: Number($('#p6').value || 0), yearly: Number($('#py').value || 0), salesPhone: $('#pw').value.replace(/\D/g, '')
       }, { merge: true });
       toast(L('Disimpan.', 'Saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }
@@ -261,8 +267,139 @@ async function viewStats() {
     <div class="stat ok"><div class="n" style="font-size:1.25rem">${money(monthRev)}</div><div class="t">${L('Hasil bulan ini', 'Revenue this month')}</div></div>
     <div class="stat"><div class="n" style="font-size:1.25rem">${money(totalRev)}</div><div class="t">${L('Jumlah hasil', 'Total revenue')}</div></div>
   </div>
+  <div class="card"><h3>${L('Ikut agen (bulan ini)', 'By agent (this month)')}</h3>
+    ${(() => {
+      const by = {};
+      paid.filter(p => p.ref && (toDate(p.paidAt || p.createdAt)?.toISOString() || '').startsWith(ym)).forEach(p => { by[p.ref] = (by[p.ref] || 0) + Number(p.amount || 0); });
+      const refs = cs.reduce((m, c) => { if (c.ref) m[c.ref] = (m[c.ref] || 0) + 1; return m; }, {});
+      const keys = [...new Set([...Object.keys(by), ...Object.keys(refs)])];
+      return keys.length ? keys.map(k => `<div class="set-row"><span class="mono">${esc(k)}</span><span class="small">${refs[k] || 0} ${L('syarikat', 'companies')} · ${money(by[k] || 0)}</span></div>`).join('') : `<div class="empty small">${L('Tiada.', 'None.')}</div>`;
+    })()}
+  </div>
   <div class="card"><h3>${L('Akan tamat dalam 7 hari', 'Expiring within 7 days')}</h3>
     ${cs.filter(c => !isExpired(c) && daysLeft(c) <= 7).map(c => `<div class="set-row"><span>${esc(c.name)} <span class="xs muted">${esc(c.phone || '')}</span></span>${statusBadge(c)} <b>${daysLeft(c)} ${L('hari', 'days')}</b></div>`).join('')
       || `<div class="empty small">${L('Tiada.', 'None.')}</div>`}
   </div>`;
+}
+
+
+// ---------- Kod promo ----------
+async function viewPromos() {
+  loading();
+  let list = [];
+  try { const s = await getDocs(query(collection(db, 'promos'), orderBy('createdAt', 'desc'), limit(300))); list = s.docs.map(d => ({ code: d.id, ...d.data() })); }
+  catch (e) { $('#view').innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; return; }
+  $('#view').innerHTML = `
+  <div class="card">
+    <h3>${L('Jana Kod Promo (sekali guna)', 'Generate Promo Codes (single-use)')}</h3>
+    <div class="grid3">
+      <div class="field"><label class="lbl">${L('Jenis', 'Type')}</label><select class="input" id="ptype"><option value="days">${L('Tambah hari langganan', 'Add subscription days')}</option><option value="percent">${L('Diskaun % semasa bayar', '% discount at payment')}</option></select></div>
+      <div class="field"><label class="lbl">${L('Nilai (hari / %)', 'Value (days / %)')}</label><input class="input" type="number" min="1" id="pval" value="30"></div>
+      <div class="field"><label class="lbl">${L('Bilangan kod', 'Number of codes')}</label><input class="input" type="number" min="1" max="200" id="pn" value="5"></div>
+    </div>
+    <div class="field"><label class="lbl">${L('Awalan (pilihan)', 'Prefix (optional)')}</label><input class="input id-input" id="ppre" maxlength="6" style="max-width:200px" placeholder="TIKTOK"></div>
+    <button class="btn btn-primary" id="pgen">${icon('plus', 18)} ${L('Jana', 'Generate')}</button>
+  </div>
+  <div class="card"><div class="card-head"><h3>${L('Senarai Kod', 'Codes')}</h3><button class="btn btn-sm btn-ghost" id="pcopy">${L('Salin kod belum guna', 'Copy unused codes')}</button></div>
+    ${list.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Kod', 'Code')}</th><th>${L('Jenis', 'Type')}</th><th>${L('Status', 'Status')}</th><th></th></tr></thead><tbody>
+      ${list.map(p => `<tr><td class="mono bold">${esc(p.code)}</td><td>${p.type === 'days' ? `+${p.value} ${L('hari', 'days')}` : `-${p.value}%`}</td>
+        <td>${p.used ? `<span class="badge">${L('Digunakan', 'Used')}${p.usedByName ? ' · ' + esc(p.usedByName) : ''}</span>` : `<span class="badge b-ok">${L('Aktif', 'Active')}</span>`}</td>
+        <td>${!p.used ? `<button class="icon-btn" data-pdel="${esc(p.code)}">✕</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">${L('Belum ada kod.', 'No codes yet.')}</div>`}</div>`;
+  $('#pgen').onclick = async (e) => {
+    const type = $('#ptype').value, value = Number($('#pval').value || 0), n = Math.min(200, Number($('#pn').value || 1));
+    const pre = $('#ppre').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!(value > 0) || (type === 'percent' && value > 100)) return toast(L('Nilai tidak sah.', 'Invalid value.'), 'warn');
+    busy(e.currentTarget, true);
+    try {
+      const b = writeBatch(db);
+      for (let i = 0; i < n; i++) {
+        const code = (pre ? pre + '-' : '') + Array.from(crypto.getRandomValues(new Uint8Array(6))).map(x => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[x % 32]).join('');
+        b.set(doc(db, 'promos', code), { type, value, used: false, createdAt: serverTimestamp() });
+      }
+      await b.commit();
+      toast(L('Kod dijana.', 'Codes generated.')); viewPromos();
+    } catch (err) { toast(authErr(err), 'bad'); busy(e.currentTarget, false); }
+  };
+  $('#pcopy').onclick = () => copyText(list.filter(p => !p.used).map(p => `${p.code} (${p.type === 'days' ? '+' + p.value + ' hari' : '-' + p.value + '%'})`).join('\n'));
+  $$('[data-pdel]').forEach(b => b.onclick = async () => { if (await confirmBox(L('Padam kod ini?', 'Delete this code?'))) { await deleteDoc(doc(db, 'promos', b.dataset.pdel)); viewPromos(); } });
+}
+
+// ---------- Agen / reseller ----------
+async function viewAgents() {
+  loading();
+  let list = [];
+  try { const s = await getDocs(collection(db, 'agents')); list = s.docs.map(d => ({ code: d.id, ...d.data() })); }
+  catch (e) { $('#view').innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; return; }
+  if (!S.companies.length) { try { await loadCompanies(); } catch {} }
+  if (!S.payments.length) { try { await loadPayments(); } catch {} }
+  const base = location.origin + '/landing.html?ref=';
+  $('#view').innerHTML = `
+  <div class="card">
+    <h3>${L('Tambah Agen', 'Add Agent')}</h3>
+    <p class="small muted">${L('Setiap agen dapat pautan khas. Syarikat yang mendaftar melalui pautan itu direkod di bawah agen tersebut.', 'Each agent gets a special link. Companies that sign up through it are recorded under that agent.')}</p>
+    <div class="grid3">
+      <div class="field"><label class="lbl">${L('Kod agen', 'Agent code')}</label><input class="input id-input" id="ac" maxlength="12"></div>
+      <div class="field"><label class="lbl">${L('Nama', 'Name')}</label><input class="input" id="an"></div>
+      <div class="field"><label class="lbl">${L('Komisen (%)', 'Commission (%)')}</label><input class="input" type="number" min="0" max="100" id="ap" value="20"></div>
+    </div>
+    <div class="field"><label class="lbl">${L('No. telefon', 'Phone')}</label><input class="input" id="at" style="max-width:240px"></div>
+    <button class="btn btn-primary" id="aadd">${icon('plus', 18)} ${L('Tambah', 'Add')}</button>
+  </div>
+  <div class="card"><h3>${L('Senarai Agen', 'Agents')}</h3>
+    ${list.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Kod', 'Code')}</th><th>${L('Nama', 'Name')}</th><th>${L('Syarikat', 'Companies')}</th><th>${L('Jualan', 'Sales')}</th><th>${L('Komisen', 'Commission')}</th><th></th></tr></thead><tbody>
+      ${list.map(a => {
+        const comps = S.companies.filter(c => (c.ref || '') === a.code).length;
+        const sales = S.payments.filter(p => p.status === 'paid' && p.ref === a.code).reduce((x, p) => x + Number(p.amount || 0), 0);
+        return `<tr><td class="mono bold">${esc(a.code)}</td><td>${esc(a.name || '')}<div class="xs muted">${esc(a.phone || '')}</div></td><td>${comps}</td><td>${money(sales)}</td><td>${money(sales * Number(a.pct || 0) / 100)} <span class="xs muted">(${a.pct || 0}%)</span></td>
+          <td style="white-space:nowrap"><button class="btn btn-sm btn-ghost" data-alink="${esc(a.code)}">${L('Salin pautan', 'Copy link')}</button><button class="icon-btn" data-adel="${esc(a.code)}">✕</button></td></tr>`;
+      }).join('')}</tbody></table></div>` : `<div class="empty">${L('Belum ada agen.', 'No agents yet.')}</div>`}</div>`;
+  $('#aadd').onclick = async () => {
+    const code = $('#ac').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!code) return toast(L('Sila isi kod agen.', 'Please enter an agent code.'), 'warn');
+    try { await setDoc(doc(db, 'agents', code), { name: $('#an').value.trim(), pct: Number($('#ap').value || 0), phone: $('#at').value.trim(), createdAt: serverTimestamp() }); viewAgents(); }
+    catch (e) { toast(authErr(e), 'bad'); }
+  };
+  $$('[data-alink]').forEach(b => b.onclick = () => copyText(base + b.dataset.alink));
+  $$('[data-adel]').forEach(b => b.onclick = async () => { if (await confirmBox(L('Padam agen ini?', 'Delete this agent?'))) { await deleteDoc(doc(db, 'agents', b.dataset.adel)); viewAgents(); } });
+}
+
+// ---------- Kit promosi ----------
+async function viewKit() {
+  const p = (await getDoc(doc(db, 'config', 'plans')).catch(() => null))?.data() || {};
+  const link = location.origin + '/landing.html';
+  const td = p.trialDays ?? 14;
+  const texts = [
+    [L('TikTok / Reels (kapsyen)', 'TikTok / Reels (caption)'), `Masih guna buku log / kad punch untuk kehadiran pekerja? 😩
+Cuba sistem kehadiran online — pekerja punch guna telefon (GPS, QR atau selfie), bos nampak semua secara langsung! 📲
+✅ Cuti & MC online
+✅ OT & syif
+✅ Gaji & slip gaji automatik
+Cuba PERCUMA ${td} hari 👉 ${link}
+#kehadiranpekerja #sistemhr #bisneskecil #usahawan #payroll`],
+    [L('Facebook / kumpulan FB', 'Facebook / FB groups'), `📢 Untuk pemilik bisnes yang ada pekerja!
+
+Sistem kehadiran & gaji yang mudah — dalam Bahasa Melayu, guna di telefon sahaja:
+• Pekerja punch masuk/keluar dengan GPS, kod QR atau tablet kiosk
+• Selfie sebagai bukti — tiada lagi "punch kan kawan"
+• Mohon cuti, MC, OT & tuntutan dalam app
+• Laporan kehadiran & Excel
+• Kira gaji, KWSP/PERKESO/SIP (kadar anda isi sendiri) & slip gaji PDF
+• Nama & logo syarikat anda sendiri
+
+💰 Mulai RM${p.monthly ?? '-'} sebulan untuk satu syarikat
+🎁 Cuba percuma ${td} hari — tiada kad kredit
+
+Daftar: ${link}`],
+    [L('WhatsApp (mesej ringkas)', 'WhatsApp (short message)'), `Salam tuan/puan 👋 Saya nak kongsi sistem kehadiran pekerja online — punch guna telefon (GPS/QR/selfie), cuti & OT online, siap kira gaji & slip gaji. Cuba percuma ${td} hari: ${link}`],
+    [L('Skrip video 30 saat', '30-second video script'), `[0-3s] "Bos, pekerja selalu lewat tapi buku log tulis tepat masa?"
+[3-10s] Tunjuk pekerja tekan Punch di telefon → selfie → GPS disahkan.
+[10-18s] Tunjuk dashboard bos: siapa hadir, lewat, belum datang — masa nyata.
+[18-25s] Tunjuk cuti/OT diluluskan & slip gaji PDF.
+[25-30s] "Cuba percuma ${td} hari. Link di bio!"`]
+  ];
+  $('#view').innerHTML = texts.map(([t, x], i) => `<div class="card"><div class="card-head"><h3>${t}</h3><button class="btn btn-sm btn-soft" data-kc="${i}">${L('Salin', 'Copy')}</button></div>
+    <pre style="white-space:pre-wrap;font-family:inherit;margin:0;background:#f8fafc;padding:.8rem;border-radius:10px">${esc(x)}</pre></div>`).join('')
+    + `<div class="card small"><b>${L('Pautan landing page', 'Landing page link')}:</b> <a href="${link}" target="_blank">${link}</a></div>`;
+  $$('[data-kc]').forEach(b => b.onclick = () => copyText(texts[Number(b.dataset.kc)][1]));
 }

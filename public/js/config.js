@@ -23,3 +23,8 @@ export const WORKER_EMAIL_DOMAIN = "pekerja.proattendance.app";
 
 // Versi Firebase SDK
 export const SDK = "10.12.2";
+
+// Notifikasi push (pilihan): Firebase Console → Project settings → Cloud Messaging →
+// Web Push certificates → "Generate key pair", kemudian tampal kunci di sini.
+// Biarkan kosong untuk matikan notifikasi push.
+export const VAPID_KEY = "";

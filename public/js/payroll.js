@@ -9,7 +9,7 @@ export const PAYROLL_DEFAULTS = {
   workDaysPerMonth: 26, hoursPerDay: 8,
   epfEe: 0, epfEr: 0, socsoEe: 0, socsoEr: 0, eisEe: 0, eisEr: 0,
   deductUnpaid: true, deductAbsent: false, lateMode: 'none', lateAmount: 0,
-  otInEpf: false, otInSocso: false
+  otInEpf: false, otInSocso: false, perfectBonus: 0
 };
 export const payrollSettings = (c) => ({ ...PAYROLL_DEFAULTS, ...(c?.payroll || {}) });
 
@@ -32,7 +32,7 @@ export function rates(w, P) {
 
 // Kira slip gaji draf seorang pekerja untuk satu bulan
 // recs: rekod kehadiran pekerja dalam bulan itu; roster: peta jadual; reqs: permohonan diluluskan pekerja ini
-export function computeItem({ c, w, period, recs, roster = {}, reqs = [] }) {
+export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans = [] }) {
   const P = payrollSettings(c);
   const { from, to } = periodRange(period);
   const today = todayStr();
@@ -104,6 +104,11 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [] }) {
     });
   });
 
+  // Bonus kehadiran penuh
+  if (Number(P.perfectBonus) > 0 && presentN > 0 && absent === 0 && lateDays === 0 && leaveUnpaid === 0) {
+    earnings.push({ name: L('Bonus kehadiran penuh', 'Perfect attendance bonus'), note: '', amount: r2(P.perfectBonus), kind: 'bonus', epf: true, socso: true });
+  }
+
   // Tuntutan (claims) — bayaran balik, tidak kena caruman
   const claimIds = [];
   reqs.filter(r => r.kind === 'claim' && !r.paidPeriod && (r.date || '') <= to).forEach(r => {
@@ -126,6 +131,16 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [] }) {
     deductions.push({ name: d.name, note: '', amount: r2(d.amount), kind: 'other', once: d.type === 'once' });
   });
 
+  // Ansuran pinjaman pekerja (dari Fail HR)
+  const loanPays = [];
+  (loans || []).filter(l => l.active !== false && (l.start || '0000-00') <= period).forEach(l => {
+    const left = r2(Number(l.total || 0) - Number(l.paid || 0));
+    const amt = r2(Math.min(Number(l.monthly || 0), left));
+    if (amt <= 0) return;
+    loanPays.push({ id: l.id, amt });
+    deductions.push({ name: `${L('Pinjaman', 'Loan')}: ${l.name || ''}`.trim(), note: `${L('baki', 'balance')} ${money(left - amt)}`, amount: amt, kind: 'loan' });
+  });
+
   // Pendahuluan gaji (advance)
   const advanceIds = [];
   reqs.filter(r => r.kind === 'advance' && !r.paidPeriod && (r.date || '') <= to).forEach(r => {
@@ -138,7 +153,7 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [] }) {
     bank: w.bank || '', bankAcc: w.bankAcc || '', epfNo: w.epfNo || '', socsoNo: w.socsoNo || '', taxNo: w.taxNo || '',
     payType: w.payType || 'monthly', rate: R.rate, dailyRate: R.daily, hourlyRate: R.hourly,
     days: { present: presentN, leavePaid, leaveUnpaid, absent, lateMin, lateDays, workHours: r2(workMin / 60), ot: otH },
-    earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, claimIds, advanceIds
+    earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, claimIds, advanceIds, loanPays, branchId: w.branchId || ''
   };
   applyStatutory(item, P, w);
   return totals(item);

@@ -22,6 +22,7 @@ import {
 import {
   computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2
 } from './payroll.js';
+import { pushAvailable, enablePush, refreshPush } from './push.js';
 
 const app = $('#app');
 const S = {
@@ -139,11 +140,21 @@ function stopAll() {
 onAuthStateChanged(auth, async (u) => {
   S.user = u;
   stopAll();
-  if (!u) return renderAuth();
+  if (!u) return renderAuth(new URLSearchParams(location.search).get('register') ? 'register' : 'login');
   app.innerHTML = `<div class="loader"><span class="spin"></span></div>`;
   try {
-    const [meS, plS] = await Promise.all([getDoc(doc(db, 'users', u.uid)), getDoc(doc(db, 'config', 'plans')).catch(() => null)]);
+    const [meS, plS, supS] = await Promise.all([
+      getDoc(doc(db, 'users', u.uid)), getDoc(doc(db, 'config', 'plans')).catch(() => null), getDoc(doc(db, 'config', 'super')).catch(() => null)
+    ]);
     S.plans = plS?.exists() ? plS.data() : {};
+    S.isSuper = !!(supS?.exists() && supS.data().uid === u.uid);
+    const asCid = new URLSearchParams(location.search).get('cid');
+    if (S.isSuper && asCid) {
+      // Mod sokongan: Super Admin masuk ke syarikat pelanggan
+      S.me = { role: 'admin', cid: asCid, perm: 'owner', support: true };
+      S.cid = asCid;
+      return startApp();
+    }
     if (!meS.exists()) return renderOnboarding();
     S.me = meS.data();
     if (S.me.role === 'worker') { location.href = '/index.html'; return; }
@@ -164,7 +175,7 @@ function suggestCode(name) {
   let c = w.length >= 2 ? w.map(x => x[0]).join('') : (w[0] || '');
   return c.slice(0, 4).padEnd(3, 'X').slice(0, 6);
 }
-function renderOnboarding() {
+function renderOnboarding(extra = false) {
   const td = Number(S.plans.trialDays || 14);
   app.innerHTML = `
   <div class="login-wrap">
@@ -183,7 +194,7 @@ function renderOnboarding() {
       <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')} *</label>
         <input class="input" id="cp" required inputmode="tel" maxlength="20"></div>
       <button class="btn btn-primary btn-block" id="ob" type="submit">${L('Mula Sekarang', 'Get Started')}</button>
-      <p class="center small" style="margin-top:1rem"><button type="button" class="link-btn" id="lo">${L('Log keluar', 'Log out')}</button></p>
+      <p class="center small" style="margin-top:1rem">${extra ? `<button type="button" class="link-btn" id="back">← ${L('Kembali', 'Back')}</button> · ` : ''}${S.isSuper ? `<a href="/superadmin.html">Super Admin</a> · ` : ''}<button type="button" class="link-btn" id="lo">${L('Log keluar', 'Log out')}</button></p>
     </form>
   </div>`;
   let manual = false, tmr = 0, okCode = false;
@@ -199,6 +210,7 @@ function renderOnboarding() {
   cn.oninput = () => { if (!manual) { cc.value = suggestCode(cn.value); clearTimeout(tmr); tmr = setTimeout(check, 400); } };
   cc.oninput = () => { manual = true; cc.value = cc.value.toUpperCase().replace(/[^A-Z]/g, ''); clearTimeout(tmr); tmr = setTimeout(check, 400); };
   $('#lo').onclick = () => signOut(auth);
+  $('#back') && ($('#back').onclick = () => startApp());
   $('#of').onsubmit = async (e) => {
     e.preventDefault();
     await check();
@@ -210,17 +222,27 @@ function renderOnboarding() {
       const newRef = doc(collection(db, 'companies'));
       const expiry = Timestamp.fromMillis(Date.now() + td * 86400000 - 120000);
       const b = writeBatch(db);
+      let ref = '';
+      try { ref = (localStorage.getItem('pa_ref') || '').toUpperCase().slice(0, 20); } catch {}
       b.set(newRef, {
-        name, code, phone: $('#cp').value.trim(), ownerUid: S.user.uid, ownerEmail: S.user.email || '',
+        name, code, phone: $('#cp').value.trim(), ownerUid: S.user.uid, ownerEmail: S.user.email || '', ref,
         logo: '', address: '', ssm: '', color: '#1d4ed8',
         status: 'trial', plan: 'trial', expiry, createdAt: serverTimestamp(), seq: 0, workerCount: 0,
         settings: { workStart: '09:00', workEnd: '18:00', grace: 10, workDays: [1, 2, 3, 4, 5], selfie: true, oneDevice: false },
         departments: [], allowanceTemplates: []
       });
       b.set(doc(db, 'companyCodes', code), { cid: newRef.id, name, logo: '', color: '#1d4ed8' });
-      b.set(doc(db, 'users', S.user.uid), { role: 'admin', cid: newRef.id, email: S.user.email || '', createdAt: serverTimestamp() });
+      if (extra) {
+        const cids = [...new Set([...(S.me.cids || [S.me.cid]), newRef.id])];
+        b.update(doc(db, 'users', S.user.uid), { cid: newRef.id, cids });
+        S.me = { ...S.me, cid: newRef.id, cids };
+      } else {
+        b.set(doc(db, 'users', S.user.uid), { role: 'admin', cid: newRef.id, cids: [newRef.id], email: S.user.email || '', createdAt: serverTimestamp() });
+        S.me = { role: 'admin', cid: newRef.id, cids: [newRef.id] };
+      }
       await b.commit();
-      S.me = { role: 'admin', cid: newRef.id }; S.cid = newRef.id;
+      S.cid = newRef.id;
+      stopAll();
       toast(L('Syarikat berjaya didaftarkan!', 'Company registered!'));
       startApp();
     } catch (err) { console.error(err); toast(authErr(err), 'bad', 5000); busy(btn, false); }
@@ -229,12 +251,24 @@ function renderOnboarding() {
 }
 
 // ================================================================ APP
+const perm = () => S.me?.perm || 'owner';
+const isOwner = () => perm() === 'owner';
+const isSupervisor = () => perm() === 'supervisor';
+function logAct(action, detail = '') {
+  if (!S.cid) return;
+  addDoc(sub('logs'), {
+    uid: S.user.uid, email: S.user.email || '', action, detail: String(detail).slice(0, 300),
+    at: serverTimestamp(), support: !!S.me?.support
+  }).catch(() => {});
+}
+
 function startApp() {
+  stopAll();
   let first = true;
   S.unsubs.push(onSnapshot(cRef(), (s) => {
     S.company = s.data();
     applyBrand(S.company);
-    if (first) { first = false; renderShell(); checkPayReturn(); }
+    if (first) { first = false; renderShell(); checkPayReturn(); if (!S.me.support) refreshPush(S.cid, S.user.uid, { role: 'admin', email: S.user.email || '' }); }
     else { updateBrandBits(); checkPaywall(); }
   }, err => toast(authErr(err), 'bad')));
   S.unsubs.push(onSnapshot(sub('workers'), (s) => {
@@ -258,13 +292,16 @@ const NAV = () => [
   ['workers', 'users', L('Pekerja', 'Staff')],
   ['roster', 'cal', L('Syif & Jadual', 'Shifts & Roster')],
   ['approvals', 'check', L('Kelulusan', 'Approvals')],
+  ['tasks', 'doc', L('Tugasan', 'Tasks')],
   ['payroll', 'money', L('Gaji', 'Payroll')],
+  ['hr', 'shield', L('Fail HR', 'HR Files')],
   ['locations', 'pin', L('Lokasi', 'Locations')],
   ['reports', 'chart', L('Laporan', 'Reports')],
   ['news', 'bell', L('Pengumuman', 'Announcements')],
   ['settings', 'gear', L('Tetapan', 'Settings')],
   ['billing', 'card', L('Langganan', 'Subscription')]
-];
+].filter(([k]) => !isSupervisor() || ['dashboard', 'roster', 'approvals', 'tasks', 'reports', 'news'].includes(k))
+ .filter(([k]) => k !== 'billing' || isOwner());
 
 function renderShell() {
   const c = S.company;
@@ -272,7 +309,9 @@ function renderShell() {
   <div class="shell">
     <aside class="side" id="side">
       <div class="side-brand"><span data-brand-logo>${logoHtml(c)}</span>
-        <div><div class="nm" data-brand-name>${esc(c.name)}</div><div class="xs" style="opacity:.7">${esc(c.code)} · Admin</div></div></div>
+        <div><div class="nm" data-brand-name>${esc(c.name)}</div><div class="xs" style="opacity:.7">${esc(c.code)} · ${S.me.support ? 'Super Admin' : ({ owner: L('Pemilik', 'Owner'), manager: L('Pengurus', 'Manager'), supervisor: L('Penyelia', 'Supervisor') })[perm()]}</div></div></div>
+      ${S.me.support ? `<div style="background:#b45309;color:#fff;padding:.5rem .8rem;font-size:.8rem;font-weight:700">${L('MOD SOKONGAN', 'SUPPORT MODE')} · <a href="/superadmin.html" style="color:#fff">${L('Kembali', 'Back')}</a></div>` : ''}
+      ${isOwner() && !S.me.support ? `<div style="padding:.5rem .8rem"><select class="input" id="coSwitch" style="background:#1e293b;color:#fff;border-color:#334155;font-size:.82rem;padding:.4rem"></select></div>` : ''}
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
         <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div>
@@ -295,8 +334,27 @@ function renderShell() {
   $('#lo').onclick = async () => { if (await confirmBox(L('Log keluar sekarang?', 'Log out now?'))) signOut(auth); };
   updateBrandBits();
   updatePendingBadge();
+  if (!NAV().some(n => n[0] === S.view)) S.view = 'dashboard';
   go(S.view);
   checkPaywall();
+  initSwitcher();
+}
+
+// Tukar antara syarikat (pemilik yang ada lebih dari satu syarikat)
+async function initSwitcher() {
+  const sel = $('#coSwitch'); if (!sel) return;
+  const ids = [...new Set([...(S.me.cids || []), S.cid])];
+  const docs = await Promise.all(ids.map(id => getDoc(doc(db, 'companies', id)).then(s => s.exists() ? { id, name: s.data().name } : null).catch(() => null)));
+  sel.innerHTML = docs.filter(Boolean).map(d => `<option value="${d.id}" ${d.id === S.cid ? 'selected' : ''}>${esc(d.name)}</option>`).join('')
+    + `<option value="__new">+ ${L('Tambah syarikat lain', 'Add another company')}</option>`;
+  sel.onchange = async () => {
+    if (sel.value === '__new') { stopAll(); S.company = null; return renderOnboarding(true); }
+    try {
+      await updateDoc(doc(db, 'users', S.user.uid), { cid: sel.value, cids: ids });
+      S.me = { ...S.me, cid: sel.value, cids: ids }; S.cid = sel.value; S.view = 'dashboard';
+      startApp();
+    } catch (e) { toast(authErr(e), 'bad'); }
+  };
 }
 function updatePendingBadge() {
   const b = $('#pendBadge'); if (!b) return;
@@ -325,14 +383,14 @@ function go(v) {
   const t = NAV().find(n => n[0] === v);
   $('#vTitle').textContent = t ? t[2] : '';
   ({ dashboard: viewDashboard, workers: viewWorkers, locations: viewLocations, reports: viewReports,
-     news: viewNews, settings: viewSettings, billing: viewBilling, roster: viewRoster, approvals: viewApprovals, payroll: viewPayroll })[v]();
+     news: viewNews, settings: viewSettings, billing: viewBilling, roster: viewRoster, approvals: viewApprovals, payroll: viewPayroll, tasks: viewTasks, hr: viewHR })[v]();
   window.scrollTo(0, 0);
 }
 
 // ================================================================ PAYWALL
 function checkPaywall() {
   $('#paywall')?.remove();
-  if (!isExpired(S.company)) return;
+  if (!isExpired(S.company) || S.me.support) return;
   const el = document.createElement('div');
   el.className = 'paywall'; el.id = 'paywall';
   el.innerHTML = `<div class="card">
@@ -361,7 +419,7 @@ function renderPlans(box) {
     <div class="plan ${i === items.length - 1 ? 'best' : ''}">
       ${i === items.length - 1 && items.length > 1 ? `<span class="badge b-brand">${L('Paling jimat', 'Best value')}</span>` : ''}
       <div class="bold" style="margin-top:.3rem">${t}</div>
-      <div class="price">${money(pr)}</div>
+      <div class="price">${S.promo ? `<s class="small muted">${money(pr)}</s> ${money(pr * (100 - S.promo.value) / 100)}` : money(pr)}</div>
       <div class="xs muted">≈ ${money(pr / m)} / ${L('bulan', 'month')}</div>
       <button class="btn btn-primary btn-block" style="margin-top:.7rem" data-plan="${k}">${L('Bayar', 'Pay')}</button>
     </div>`).join('')}</div>
@@ -369,7 +427,7 @@ function renderPlans(box) {
   $$('[data-plan]', box).forEach(b => b.onclick = async () => {
     busy(b, true);
     try {
-      const r = await call('pa_createBill', { plan: b.dataset.plan });
+      const r = await call('pa_createBill', { plan: b.dataset.plan, promo: S.promo?.code || '' });
       if (r?.url) location.href = r.url; else throw new Error('No URL');
     } catch (e) { toast(L('Gagal memulakan bayaran: ', 'Failed to start payment: ') + (e.message || e), 'bad', 5000); busy(b, false); }
   });
@@ -393,13 +451,32 @@ function viewDashboard() {
   v.innerHTML = `
     <div class="row between" style="margin-bottom:.8rem">
       <div><h2 style="margin:0">${L('Hari ini', 'Today')}</h2><div class="muted small">${fmtDate(t, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
-      <button class="btn btn-soft btn-sm" data-goto="reports">${icon('chart', 16)} ${L('Laporan', 'Reports')}</button>
+      <div class="row"><button class="btn btn-ok btn-sm" id="waSum">${icon('chat', 16)} ${L('Kongsi ringkasan', 'Share summary')}</button>
+      <button class="btn btn-soft btn-sm" data-goto="reports">${icon('chart', 16)} ${L('Laporan', 'Reports')}</button></div>
     </div>
     <div class="stats" id="dStats"></div>
     <div class="grid2" style="gap:1rem;align-items:start">
       <div class="card"><div class="card-head"><h3>${L('Aktiviti terkini', 'Latest activity')}</h3></div><div id="dAct"></div></div>
       <div class="card"><div class="card-head"><h3>${L('Belum hadir', 'Not yet in')}</h3></div><div id="dAbs"></div></div>
+    </div>
+    <div class="grid2" style="gap:1rem;align-items:start;margin-top:1rem">
+      <div class="card"><h3>${L('Kehadiran 14 hari', 'Attendance, last 14 days')}</h3><div id="dTrend"><div class="loader" style="min-height:100px"><span class="spin"></span></div></div></div>
+      <div class="card"><h3>${L('Peringatan', 'Reminders')}</h3><div id="dRem"><div class="loader" style="min-height:100px"><span class="spin"></span></div></div></div>
+    </div>
+    <div class="grid2" style="gap:1rem;align-items:start;margin-top:1rem">
+      <div class="card"><h3>${L('Kehadiran terbaik bulan ini', 'Best attendance this month')}</h3><div id="dRank"></div></div>
+      <div class="card"><h3>${L('Ramalan kakitangan 14 hari', 'Staffing forecast, 14 days')}</h3><div id="dFc"></div></div>
     </div>`;
+  $('#waSum').onclick = () => {
+    const st = S.dashStats; if (!st) return;
+    const txt = `*${S.company.name}* — ${L('Ringkasan kehadiran', 'Attendance summary')} ${fmtDate(t)}
+${L('Hadir', 'Present')}: ${st.present}/${st.active}
+${L('Lewat', 'Late')}: ${st.late}
+${L('Bercuti', 'On leave')}: ${st.leave}
+${L('Belum hadir', 'Not in')}: ${st.absent.length}${st.absent.length ? '\n- ' + st.absent.join('\n- ') : ''}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`, '_blank');
+  };
+  dashExtras();
   $$('[data-goto]').forEach(b => b.onclick = () => go(b.dataset.goto));
   if (!S.workers.length && !S.locations.length) {
     $('#dAct').innerHTML = `<div class="empty">${L('Mula dengan menambah lokasi dan pekerja.', 'Start by adding locations and staff.')}<br><br>
@@ -433,8 +510,10 @@ function viewDashboard() {
       if (s.lastType === 'out') out++;
     });
     const onLeave = active.filter(w => todayLeave[w.id] && !presentIds.has(w.id));
+    S.dashStats = { present, late, active: active.length, leave: onLeave.length, absent: [] };
     const absent = active.filter(w => !presentIds.has(w.id) && !todayLeave[w.id]
       && resolveDay(S.company, w, t, roster[t]?.[w.id]).type === 'work');
+    S.dashStats.absent = absent.map(w => w.name);
     $('#dStats').innerHTML = `
       <div class="stat"><div class="n">${active.length}</div><div class="t">${L('Pekerja aktif', 'Active staff')}</div></div>
       <div class="stat ok"><div class="n">${present}</div><div class="t">${L('Hadir', 'Present')}</div></div>
@@ -455,11 +534,11 @@ function viewDashboard() {
           <td><span class="badge ${r.type === 'in' ? 'b-ok' : r.type === 'out' ? 'b-bad' : 'b-warn'}">${TYPE_LABEL[r.type]()}</span></td>
           <td class="small">${esc(r.locName || '-')}<div class="xs muted">${METHOD_LABEL[r.method || 'button']()}${r.dist != null ? ' · ' + r.dist + ' m' : ''}
             ${r.lat != null ? ` · <a href="${mapLink(r.lat, r.lng)}" target="_blank" rel="noopener">${L('Peta', 'Map')}</a>` : ''}</div></td>
-          <td>${r.selfie ? `<img class="thumb" src="${r.selfie}" data-img="${r.id}" alt="">` : ''}</td>
+          <td>${r.selfie ? `<img class="thumb" src="${r.selfie}" data-img="${r.id}" alt="">` : r.hasSelfie ? `<button class="btn btn-sm btn-ghost" data-img="${r.id}">📷</button>` : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : `<div class="empty">${L('Belum ada punch hari ini.', 'No punches yet today.')}</div>`;
       $$('[data-img]').forEach(im => im.onclick = () => {
         const r = recs.find(x => x.id === im.dataset.img);
-        modal({ title: `${esc(r.name)} · ${TYPE_LABEL[r.type]()} ${fmtTime(r.ts)}`, body: `<img src="${r.selfie}" style="width:100%;border-radius:12px">` });
+        showSelfie(r);
       });
     }
     $('#dAbs').innerHTML = absent.length ? `<ul class="timeline">${absent.map(w =>
@@ -469,17 +548,30 @@ function viewDashboard() {
   });
 }
 
+async function showSelfie(r) {
+  let src = r.selfie;
+  if (!src) {
+    try { const s = await getDoc(doc(db, 'companies', S.cid, 'selfies', r.id)); src = s.exists() ? s.data().selfie : ''; } catch {}
+  }
+  modal({
+    title: `${esc(r.name)} · ${TYPE_LABEL[r.type]?.() || r.type} ${fmtTime(r.ts)}`,
+    body: src ? `<img src="${src}" style="width:100%;border-radius:12px">` : `<div class="empty">${L('Tiada gambar.', 'No photo.')}</div>`
+  });
+}
+
 // ================================================================ PEKERJA
 function viewWorkers() {
   $('#view').innerHTML = `
   <div class="card">
     <div class="card-head">
       <input class="input" id="wq" style="max-width:280px" placeholder="${L('Cari nama / ID…', 'Search name / ID…')}">
-      <button class="btn btn-primary" id="addW">${icon('plus', 18)} ${L('Tambah Pekerja', 'Add Staff')}</button>
+      <div class="row"><button class="btn btn-ghost" id="cardsAll">${icon('qr', 18)} ${L('Kad semua', 'All cards')}</button>
+      <button class="btn btn-primary" id="addW">${icon('plus', 18)} ${L('Tambah Pekerja', 'Add Staff')}</button></div>
     </div>
     <div id="wList"></div>
   </div>`;
   $('#addW').onclick = () => workerForm(null);
+  $('#cardsAll').onclick = () => printCards(S.workers.filter(w => w.active !== false));
   $('#wq').oninput = renderWorkerList;
   renderWorkerList();
 }
@@ -557,6 +649,7 @@ function workerForm(w) {
         <div class="field"><label class="lbl">${L('No. IC / Pasport', 'IC / Passport no.')}</label><input class="input" name="ic" value="${esc(w.ic || '')}"></div>
         <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')}</label><input class="input" name="phone" inputmode="tel" value="${esc(w.phone || '')}"></div>
         <div class="field"><label class="lbl">${L('E-mel (pilihan)', 'Email (optional)')}</label><input class="input" name="email" type="email" value="${esc(w.email || '')}"></div>
+        <div class="field"><label class="lbl">${L('Tarikh lahir', 'Date of birth')}</label><input class="input" name="dob" type="date" value="${esc(w.dob || '')}"></div>
       </div>
       <div class="sec-title">${L('Pekerjaan', 'Employment')}</div>
       <div class="grid2">
@@ -632,7 +725,7 @@ async function saveWorker(el, w) {
   if (!f.reportValidity()) return false;
   const fd = Object.fromEntries(new FormData(f).entries());
   const data = {
-    name: fd.name.trim(), ic: fd.ic.trim(), phone: fd.phone.trim(), email: fd.email.trim(),
+    name: fd.name.trim(), ic: fd.ic.trim(), phone: fd.phone.trim(), email: fd.email.trim(), dob: fd.dob || '',
     position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, startDate: fd.startDate || '',
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
@@ -646,6 +739,7 @@ async function saveWorker(el, w) {
   try {
     if (w) {
       await updateDoc(doc(db, 'companies', S.cid, 'workers', w.id), data);
+      logAct('worker.update', `${w.id} ${data.name}`);
       toast(L('Maklumat pekerja dikemas kini.', 'Staff updated.'));
       return;
     }
@@ -667,6 +761,7 @@ async function saveWorker(el, w) {
     b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...data, uid, active: true, mustChangePin: true, deviceId: null, createdAt: serverTimestamp() });
     b.update(cRef(), { workerCount: increment(1) });
     await b.commit();
+    logAct('worker.create', `${wid} ${data.name}`);
     showLogin(wid, pin, data.name, data.phone, true);
   } catch (e) {
     console.error(e);
@@ -724,6 +819,8 @@ function workerMenu(w) {
       <button class="btn btn-ghost btn-block" data-act="pin">${icon('shield', 18)} ${L('Reset PIN', 'Reset PIN')}</button>
       <button class="btn btn-ghost btn-block" data-act="dev">${icon('user', 18)} ${L('Reset telefon berdaftar', 'Reset registered phone')}</button>
       <button class="btn btn-ghost btn-block" data-act="hist">${icon('cal', 18)} ${L('Lihat rekod kehadiran', 'View attendance')}</button>
+      ${!isSupervisor() ? `<button class="btn btn-ghost btn-block" data-act="hr">${icon('shield', 18)} ${L('Fail HR', 'HR File')}</button>` : ''}
+      <button class="btn btn-ghost btn-block" data-act="card">${icon('qr', 18)} ${L('Cetak kad pekerja', 'Print staff card')}</button>
       <button class="btn ${w.active === false ? 'btn-ok' : 'btn-danger'} btn-block" data-act="act">${w.active === false ? L('Aktifkan semula', 'Reactivate') : L('Nyahaktifkan pekerja', 'Deactivate staff')}</button>
     </div>`
   });
@@ -733,7 +830,7 @@ function workerMenu(w) {
       if (!await confirmBox(L(`Reset PIN untuk ${w.name}?`, `Reset PIN for ${w.name}?`))) return;
       busy(b, true);
       const pin = randPin();
-      try { await call('pa_resetWorkerPin', { workerId: w.id, pin }); m.close(); showLogin(w.id, pin, w.name, w.phone, false); }
+      try { await call('pa_resetWorkerPin', { workerId: w.id, pin }); logAct('worker.resetPin', w.id); m.close(); showLogin(w.id, pin, w.name, w.phone, false); }
       catch (e) { toast(L('Gagal reset PIN: ', 'Failed to reset PIN: ') + (e.message || e), 'bad', 5000); }
       finally { busy(b, false); }
     } else if (a === 'dev') {
@@ -742,12 +839,17 @@ function workerMenu(w) {
       m.close();
     } else if (a === 'hist') {
       m.close(); S.reportWorker = w.id; go('reports');
+    } else if (a === 'hr') {
+      m.close(); S.hrWorker = w.id; go('hr');
+    } else if (a === 'card') {
+      printCards([w]);
     } else if (a === 'act') {
       const to = w.active === false;
       if (!await confirmBox(to ? L(`Aktifkan semula ${w.name}?`, `Reactivate ${w.name}?`) : L(`Nyahaktifkan ${w.name}? Pekerja tidak boleh log masuk atau punch.`, `Deactivate ${w.name}? They will not be able to log in or punch.`))) return;
       busy(b, true);
       try { await call('pa_setWorkerActive', { workerId: w.id, active: to }); }
       catch { await updateDoc(doc(db, 'companies', S.cid, 'workers', w.id), { active: to }); }
+      logAct(to ? 'worker.activate' : 'worker.deactivate', w.id);
       toast(to ? L('Pekerja diaktifkan.', 'Staff activated.') : L('Pekerja dinyahaktifkan.', 'Staff deactivated.'));
       m.close();
     }
@@ -761,7 +863,8 @@ function viewLocations() {
   <div class="card">
     <div class="card-head"><div><h3>${L('Lokasi & Cawangan', 'Locations & Branches')}</h3>
       <p class="small muted">${L('Setiap lokasi boleh guna mod clock-in yang berbeza.', 'Each location can use a different clock-in mode.')}</p></div>
-      <button class="btn btn-primary" id="addL">${icon('plus', 18)} ${L('Tambah Lokasi', 'Add Location')}</button></div>
+      <div class="row"><a class="btn btn-ghost" href="/kiosk.html" target="_blank">${icon('building', 18)} ${L('Mod Kiosk (tablet)', 'Kiosk Mode (tablet)')}</a>
+      <button class="btn btn-primary" id="addL">${icon('plus', 18)} ${L('Tambah Lokasi', 'Add Location')}</button></div></div>
     ${S.locations.length ? `<div class="table-wrap"><table>
       <thead><tr><th>${L('Nama', 'Name')}</th><th>${L('Mod', 'Mode')}</th><th>${L('Radius', 'Radius')}</th><th>${L('Koordinat', 'Coordinates')}</th><th></th></tr></thead>
       <tbody>${S.locations.map(l => `<tr>
@@ -790,6 +893,7 @@ function viewLocations() {
     const l = S.locations.find(x => x.id === b.dataset.dl);
     if (!await confirmBox(L(`Padam lokasi "${l.name}"?`, `Delete location "${l.name}"?`))) return;
     await deleteDoc(doc(db, 'companies', S.cid, 'locations', l.id));
+    logAct('location.delete', l.name);
     toast(L('Lokasi dipadam.', 'Location deleted.'));
   });
 }
@@ -826,6 +930,7 @@ function locationForm(l) {
           try {
             if (isNew) await addDoc(sub('locations'), { ...data, qrSecret: randSecret(), createdAt: serverTimestamp() });
             else await updateDoc(doc(db, 'companies', S.cid, 'locations', l.id), { ...data, ...(l.qrSecret ? {} : { qrSecret: randSecret() }) });
+            logAct('location.save', data.name);
             toast(L('Lokasi disimpan.', 'Location saved.'));
           } catch (e) { toast(authErr(e), 'bad'); return false; }
         }
@@ -986,6 +1091,8 @@ function viewNews() {
     <h3>${L('Hantar Pengumuman', 'Post Announcement')}</h3>
     <div class="field"><input class="input" id="nt" maxlength="120" placeholder="${L('Tajuk', 'Title')}"></div>
     <div class="field"><textarea class="input" id="nbd" maxlength="2000" placeholder="${L('Mesej kepada semua pekerja…', 'Message to all staff…')}"></textarea></div>
+    <div class="field"><label class="lbl">${L('Undian (pilihan) — satu pilihan setiap baris', 'Poll (optional) — one option per line')}</label>
+      <textarea class="input" id="nopt" maxlength="500" style="min-height:60px" placeholder="${L('cth:\nSetuju\nTidak setuju', 'e.g.\nAgree\nDisagree')}"></textarea></div>
     <button class="btn btn-primary" id="nsend">${icon('plus', 18)} ${L('Hantar', 'Post')}</button>
   </div>
   <div class="card"><h3>${L('Senarai Pengumuman', 'Announcements')}</h3><div id="nlist"></div></div>`;
@@ -993,7 +1100,8 @@ function viewNews() {
     const title = $('#nt').value.trim(), body = $('#nbd').value.trim();
     if (!title) return toast(L('Sila isi tajuk.', 'Please enter a title.'), 'warn');
     busy(e.currentTarget, true);
-    try { await addDoc(sub('announcements'), { title, body, createdAt: serverTimestamp(), by: S.user.email || '' }); $('#nt').value = ''; $('#nbd').value = ''; toast(L('Pengumuman dihantar.', 'Announcement posted.')); }
+    const options = $('#nopt').value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10);
+    try { await addDoc(sub('announcements'), { title, body, options, createdAt: serverTimestamp(), by: S.user.email || '' }); $('#nt').value = ''; $('#nbd').value = ''; $('#nopt').value = ''; logAct('announcement.create', title); toast(L('Pengumuman dihantar.', 'Announcement posted.')); }
     catch (err) { toast(authErr(err), 'bad'); }
     finally { busy(e.currentTarget, false); }
   };
@@ -1001,9 +1109,18 @@ function viewNews() {
     $('#nlist').innerHTML = s.empty ? `<div class="empty">${L('Tiada pengumuman.', 'No announcements.')}</div>` : s.docs.map(d => {
       const a = d.data({ serverTimestamps: 'estimate' });
       return `<div class="day-row" style="align-items:flex-start"><div class="grow"><div class="bold">${esc(a.title)}</div>
-        <div class="small" style="white-space:pre-wrap">${esc(a.body)}</div><div class="xs muted">${fmtDateTime(a.createdAt)}</div></div>
+        <div class="small" style="white-space:pre-wrap">${esc(a.body)}</div>
+        ${(a.options || []).length ? `<div class="row" style="margin:.3rem 0" data-res="${d.id}">${a.options.map((o, i) => `<span class="badge" data-o="${i}">${esc(o)}: …</span>`).join('')}</div>` : ''}
+        <div class="xs muted">${fmtDateTime(a.createdAt)}</div></div>
         <button class="icon-btn" data-dn="${d.id}">✕</button></div>`;
     }).join('');
+    $$('[data-res]').forEach(async box => {
+      try {
+        const v = await getDocs(collection(db, 'companies', S.cid, 'announcements', box.dataset.res, 'votes'));
+        const cnt = {}; v.docs.forEach(x => { cnt[x.data().opt] = (cnt[x.data().opt] || 0) + 1; });
+        $$('[data-o]', box).forEach(b => { b.textContent = b.textContent.replace(/: …$/, '') + ': ' + (cnt[b.dataset.o] || 0); b.classList.add('b-brand'); });
+      } catch {}
+    });
     $$('[data-dn]').forEach(b => b.onclick = async () => {
       if (await confirmBox(L('Padam pengumuman ini?', 'Delete this announcement?'))) await deleteDoc(doc(db, 'companies', S.cid, 'announcements', b.dataset.dn));
     });
@@ -1049,6 +1166,8 @@ function viewSettings() {
       <label class="switch"><input type="checkbox" id="tSelfie" ${st.selfie !== false ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><div><b>${L('Satu telefon seorang pekerja', 'One phone per staff')}</b><div class="small muted">${L('Akaun dikunci pada telefon pertama yang log masuk.', 'Account locks to the first phone that logs in.')}</div></div>
       <label class="switch"><input type="checkbox" id="tDev" ${st.oneDevice ? 'checked' : ''}><span></span></label></div>
+    <div class="set-row"><div><b>${L('Butang Lawatan Tapak', 'Site Visit button')}</b><div class="small muted">${L('Pekerja lapangan boleh rekod lawatan ke tapak/pelanggan (GPS + gambar).', 'Field staff can record visits to sites/clients (GPS + photo).')}</div></div>
+      <label class="switch"><input type="checkbox" id="tVisit" ${st.visits ? 'checked' : ''}><span></span></label></div>
     <button class="btn btn-primary" id="saveWork" style="margin-top:.8rem">${L('Simpan Tetapan', 'Save Settings')}</button>
   </div>
 
@@ -1099,10 +1218,27 @@ function viewSettings() {
     <button class="btn btn-primary btn-sm" id="otSave">${L('Simpan', 'Save')}</button>
   </div>
 
+  ${isOwner() ? `<div class="card">
+    <div class="card-head"><h3>${L('Admin & Penyelia', 'Admins & Supervisors')}</h3>
+      <button class="btn btn-sm btn-plus" id="admAdd">${icon('plus', 16)} ${L('Tambah Admin', 'Add Admin')}</button></div>
+    <p class="small muted">${L('Pengurus: semua kecuali langganan & urus admin. Penyelia: dashboard, jadual, kelulusan, tugasan, laporan & pengumuman sahaja.', 'Manager: everything except subscription & admin management. Supervisor: dashboard, roster, approvals, tasks, reports & announcements only.')}</p>
+    <div id="admList"><div class="loader" style="min-height:60px"><span class="spin"></span></div></div>
+  </div>` : ''}
+
+  <div class="card">
+    <h3>${L('Log Perubahan & Sandaran', 'Change Log & Backup')}</h3>
+    <div class="row">
+      <button class="btn btn-ghost" id="logBtn">${icon('doc', 18)} ${L('Lihat log perubahan', 'View change log')}</button>
+      <button class="btn btn-ghost" id="bkBtn">${icon('dl', 18)} ${L('Muat turun semua data (JSON)', 'Download all data (JSON)')}</button>
+    </div>
+  </div>
+
   <div class="card">
     <h3>${L('Akaun', 'Account')}</h3>
     <div class="set-row"><span class="muted">${L('E-mel', 'Email')}</span><b>${esc(S.user.email || '')}</b></div>
     <div class="set-row"><span class="muted">${L('Bahasa', 'Language')}</span>${langBtn().replace('lang-btn', 'btn btn-sm btn-ghost')}</div>
+    <div class="set-row hide" id="pushRow"><span class="muted">${L('Notifikasi push (permohonan baharu)', 'Push notifications (new requests)')}</span>
+      <button class="btn btn-sm btn-ghost" id="pushA">${L('Hidupkan', 'Turn on')}</button></div>
     <div class="set-row"><span class="muted">${L('Pautan login pekerja', 'Staff login link')}</span>
       <button class="btn btn-sm btn-ghost" id="cpLink">${esc(location.host)} · ${L('Salin', 'Copy')}</button></div>
   </div>`;
@@ -1127,6 +1263,7 @@ function viewSettings() {
       b.update(cRef(), { name, logo, color, ssm: $('#sSsm').value.trim(), phone: $('#sPhone').value.trim(), address: $('#sAddr').value.trim() });
       b.update(doc(db, 'companyCodes', c.code), { name, logo, color });
       await b.commit();
+      logAct('settings.profile', name);
       toast(L('Profil disimpan.', 'Profile saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }
     finally { busy(e.currentTarget, false); }
@@ -1138,8 +1275,9 @@ function viewSettings() {
         'settings.workStart': $('#wS').value || '09:00', 'settings.workEnd': $('#wE').value || '18:00',
         'settings.grace': Number($('#wG').value || 0),
         'settings.workDays': $$('[data-wd]').filter(x => x.checked).map(x => Number(x.dataset.wd)),
-        'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked
+        'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked
       });
+      logAct('settings.work');
       toast(L('Tetapan disimpan.', 'Settings saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }
     finally { busy(e.currentTarget, false); }
@@ -1167,6 +1305,19 @@ function viewSettings() {
     finally { busy(e.currentTarget, false); }
   };
   $('#cpLink').onclick = () => copyText(location.origin);
+
+  $('#logBtn').onclick = showLogs;
+  if (!S.me.support) pushAvailable().then(ok => {
+    if (!ok || !$('#pushRow')) return;
+    $('#pushRow').classList.remove('hide');
+    if (Notification.permission === 'granted') $('#pushA').textContent = '✓ ' + L('Aktif', 'On');
+    $('#pushA').onclick = async () => {
+      try { await enablePush(S.cid, S.user.uid, { role: 'admin', email: S.user.email || '' }); $('#pushA').textContent = '✓ ' + L('Aktif', 'On'); }
+      catch { toast(L('Notifikasi tidak dibenarkan oleh pelayar.', 'Notifications blocked by the browser.'), 'warn'); }
+    };
+  });
+  $('#bkBtn').onclick = (e) => backupAll(e.currentTarget);
+  if ($('#admList')) { drawAdmins(); $('#admAdd').onclick = addAdmin; }
 
   // Jenis cuti
   const ltBox = $('#ltBox'); bindDyn(ltBox);
@@ -1241,11 +1392,24 @@ async function viewBilling() {
       <div class="stat"><div class="t">${L('Pekerja', 'Staff')}</div><div class="n" style="font-size:1.2rem">${S.workers.length}</div></div>
     </div>
   </div>
+  <div class="card"><h3>${L('Kod Promo', 'Promo Code')}</h3>
+    <div class="row"><input class="input id-input" id="promoIn" style="max-width:220px" placeholder="KOD">
+      <button class="btn btn-soft" id="promoBtn">${L('Guna', 'Apply')}</button><span class="small" id="promoMsg">${S.promo ? `✓ ${esc(S.promo.code)} −${S.promo.value}%` : ''}</span></div></div>
   <div class="card"><h3>${L('Perbaharui / Naik Taraf', 'Renew / Upgrade')}</h3>
     <p class="small muted">${L('Tempoh baharu akan ditambah selepas tarikh tamat semasa.', 'New period is added after the current expiry date.')}</p>
     <div id="bPlans" style="margin-top:.8rem"></div></div>
   <div class="card"><h3>${L('Sejarah Bayaran', 'Payment History')}</h3><div id="bHist"><div class="loader" style="min-height:80px"><span class="spin"></span></div></div></div>`;
   renderPlans($('#bPlans'));
+  $('#promoBtn').onclick = async (e) => {
+    const code = $('#promoIn').value.trim().toUpperCase(); if (!code) return;
+    busy(e.currentTarget, true);
+    try {
+      const r = await call('pa_redeemPromo', { code });
+      if (r.type === 'days') { toast(L(`Berjaya! Langganan dilanjutkan ${r.value} hari.`, `Done! Subscription extended by ${r.value} days.`)); logAct('promo.redeem', code); }
+      else { S.promo = { code, value: r.value }; toast(L(`Diskaun ${r.value}% akan digunakan semasa bayaran.`, `${r.value}% discount will apply at payment.`)); viewBilling(); }
+    } catch (err) { toast(err.message || String(err), 'bad', 5000); }
+    finally { busy(e.currentTarget, false); }
+  };
   try {
     const s = await getDocs(query(collection(db, 'payments'), where('cid', '==', S.cid)));
     const list = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
@@ -1454,6 +1618,9 @@ async function drawApprovals() {
       }
     } else if (r.kind === 'ot') {
       detail = `${fmtDate(r.date)} · ${esc(r.start)}–${esc(r.end)} · <b>${r.approvedHours ?? r.hours}</b> ${L('jam', 'hrs')} · ${OT_LABEL[otKind(resolveDay(S.company, w, r.date))]()}`;
+    } else if (r.kind === 'swap') {
+      const o = S.workers.find(x => x.id === r.withId);
+      detail = `${fmtDate(r.date)} · ${L('tukar syif dengan', 'swap shift with')} <b>${esc(r.withId)}</b> ${o ? esc(o.name) : `<span class="badge b-bad">${L('ID tidak wujud', 'ID not found')}</span>`}`;
     } else if (r.kind === 'claim') {
       detail = `<b>${esc(r.category || '')}</b> · ${fmtDate(r.date)} · <b>${money(r.approvedAmount ?? r.amount)}</b>${r.paidPeriod ? ` · <span class="badge b-ok">${L('Dibayar', 'Paid')} ${esc(r.paidPeriod)}</span>` : ''}`;
     } else if (r.kind === 'advance') {
@@ -1502,6 +1669,18 @@ function decide(r, ok) {
             if (ok && r.kind === 'ot') upd.approvedHours = Number($('#apH', el).value || 0);
             if (ok && (r.kind === 'claim' || r.kind === 'advance')) upd.approvedAmount = Number($('#apA', el).value || 0);
             b.update(doc(db, 'companies', S.cid, 'requests', r.id), upd);
+            if (ok && r.kind === 'swap') {
+              const ro = await loadRoster(db, S.cid, r.date, r.date);
+              const a = ro[r.date] || {};
+              const eff = (wid) => {
+                if (a[wid]) return a[wid];
+                const w = S.workers.find(x => x.id === wid);
+                const di = resolveDay(S.company, w, r.date, undefined);
+                return di.type === 'off' ? 'off' : (di.shift?.id || '');
+              };
+              const mine = eff(r.workerId), theirs = eff(r.withId);
+              b.set(doc(db, 'companies', S.cid, 'roster', r.date), { a: { [r.workerId]: theirs || deleteField(), [r.withId]: mine || deleteField() } }, { merge: true });
+            }
             if (ok && r.kind === 'fix') {
               const ts = new Date(`${r.date}T${r.time}:00`);
               b.set(doc(sub('attendance')), {
@@ -1511,6 +1690,7 @@ function decide(r, ok) {
               });
             }
             await b.commit();
+            logAct(ok ? 'request.approve' : 'request.reject', `${r.kind} ${r.workerId} ${r.id}`);
             S.apApproved = null;
             toast(ok ? L('Diluluskan.', 'Approved.') : L('Ditolak.', 'Rejected.'));
             if (S.apTab !== 'pending') drawApprovals();
@@ -1521,12 +1701,19 @@ function decide(r, ok) {
   });
 }
 
+// Jumlah ansuran pinjaman yang telah dibayar (dari gaji yang dikunci)
+function loanPaid(hr, loanId, exceptPeriod) {
+  return r2(Object.entries(hr?.loanTx || {}).filter(([p]) => p !== exceptPeriod)
+    .reduce((a, [, arr]) => a + (arr || []).filter(x => x.id === loanId).reduce((b, x) => b + Number(x.amt || 0), 0), 0));
+}
+
 // ================================================================ GAJI
 function viewPayroll() {
   S.payTab = S.payTab || 'run';
   $('#view').innerHTML = `
     <div class="tabs">
       <button data-ptab="run">${L('Proses Gaji', 'Run Payroll')}</button>
+      <button data-ptab="ea">${L('Ringkasan Tahunan (EA)', 'Yearly Summary (EA)')}</button>
       <button data-ptab="settings">${L('Tetapan Gaji', 'Payroll Settings')}</button>
     </div>
     <div id="payBody"></div>`;
@@ -1534,7 +1721,7 @@ function viewPayroll() {
     b.classList.toggle('on', b.dataset.ptab === S.payTab);
     b.onclick = () => { S.payTab = b.dataset.ptab; viewPayroll(); };
   });
-  S.payTab === 'settings' ? drawPaySettings() : drawPayrun();
+  S.payTab === 'settings' ? drawPaySettings() : S.payTab === 'ea' ? drawEA() : drawPayrun();
 }
 
 // Komit batch dalam ketulan (had 500 operasi)
@@ -1626,6 +1813,11 @@ async function drawPayrun() {
         <span class="badge">${L('KWSP', 'EPF')}: ${money(t.epf)}</span><span class="badge">${L('PERKESO', 'SOCSO')}: ${money(t.socso)}</span>
         <span class="badge">${L('SIP', 'EIS')}: ${money(t.eis)}</span><span class="badge">PCB: ${money(t.pcb)}</span>
       </div>
+      <div style="margin-top:.6rem"><b>${L('Kos buruh ikut lokasi', 'Labour cost by location')}</b> <span class="xs muted">(${L('kasar + caruman majikan', 'gross + employer contributions')})</span>
+        <div class="row" style="margin-top:.3rem">${Object.entries(items.reduce((m, x) => {
+          const k = S.locations.find(l => l.id === (x.branchId || S.workers.find(w => w.id === x.workerId)?.branchId))?.name || L('Tiada lokasi', 'No location');
+          m[k] = (m[k] || 0) + (x.gross || 0) + (x.employerTotal || 0); return m;
+        }, {})).map(([k, v]) => `<span class="badge b-brand">${esc(k)}: ${money(v)}</span>`).join('')}</div></div>
       ${locked ? `<p class="xs muted" style="margin-top:.5rem">${L('Dikunci pada', 'Locked on')} ${fmtDateTime(run.lockedAt)}. ${L('Slip boleh dilihat oleh pekerja dalam app.', 'Staff can view their slips in the app.')}</p>`
         : `<p class="xs muted" style="margin-top:.5rem">${L('Semak & sunting setiap pekerja, kemudian tekan "Kunci & Terbit Slip". Tuntutan & pendahuluan akan ditanda dibayar, dan item "sekali sahaja" dibuang dari profil pekerja.', 'Review & edit each staff, then press "Lock & Publish Slips". Claims & advances will be marked paid, and "one-time" items removed from staff profiles.')}</p>`}
     </div>`;
@@ -1646,11 +1838,13 @@ async function generatePayrun(period, btn) {
   busy(btn, true);
   try {
     const { from, to } = periodRange(period);
-    const [att, roster, rq] = await Promise.all([
+    const [att, roster, rq, hrS] = await Promise.all([
       getDocs(query(sub('attendance'), where('date', '>=', from), where('date', '<=', to))),
       loadRoster(db, S.cid, from, to).catch(() => ({})),
-      getDocs(query(sub('requests'), where('status', '==', 'approved')))
+      getDocs(query(sub('requests'), where('status', '==', 'approved'))),
+      getDocs(sub('hr')).catch(() => null)
     ]);
+    const hrMap = {}; (hrS ? hrS.docs : []).forEach(d => { hrMap[d.id] = d.data(); });
     const recs = att.docs.map(d => d.data());
     const reqs = rq.docs.map(d => ({ id: d.id, ...d.data() }));
     const withRecs = new Set(recs.map(r => r.workerId));
@@ -1660,12 +1854,14 @@ async function generatePayrun(period, btn) {
       items[w.id] = computeItem({
         c: S.company, w, period, roster,
         recs: recs.filter(r => r.workerId === w.id),
-        reqs: reqs.filter(r => r.workerId === w.id)
+        reqs: reqs.filter(r => r.workerId === w.id),
+        loans: (hrMap[w.id]?.loans || []).map(l => ({ ...l, paid: loanPaid(hrMap[w.id], l.id, period) }))
       });
     });
     await setDoc(doc(db, 'companies', S.cid, 'payruns', period), {
       period, status: 'draft', items, totals: payTotals(items), createdAt: serverTimestamp(), updatedAt: serverTimestamp(), by: S.user.email || ''
     });
+    logAct('payroll.generate', period);
     toast(L('Draf gaji dijana. Sila semak.', 'Payroll draft generated. Please review.'));
     drawPayrun();
   } catch (e) { console.error(e); toast(authErr(e), 'bad', 5000); busy(btn, false); }
@@ -1763,6 +1959,7 @@ async function lockPayrun(period, run, btn) {
       ops.push(b => b.set(doc(db, 'companies', S.cid, 'payslips', `${period}_${it.workerId}`), { ...it, period, publishedAt: serverTimestamp() }));
       (it.claimIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: period })));
       (it.advanceIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: period })));
+      if ((it.loanPays || []).length) ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', it.workerId), { loanTx: { [period]: it.loanPays } }, { merge: true }));
       const w = S.workers.find(x => x.id === it.workerId);
       if (w && ((w.allowances || []).some(a => a.type === 'once') || (w.deductions || []).some(d => d.type === 'once'))) {
         ops.push(b => b.update(doc(db, 'companies', S.cid, 'workers', w.id), {
@@ -1772,6 +1969,7 @@ async function lockPayrun(period, run, btn) {
       }
     });
     await commitOps(ops);
+    logAct('payroll.lock', period);
     toast(L('Gaji dikunci & slip diterbitkan.', 'Payroll locked & slips published.'));
     drawPayrun();
   } catch (e) { console.error(e); toast(authErr(e), 'bad', 5000); busy(btn, false); }
@@ -1785,8 +1983,10 @@ async function unlockPayrun(period, run, btn) {
     Object.values(run.items || {}).forEach(it => {
       ops.push(b => b.delete(doc(db, 'companies', S.cid, 'payslips', `${period}_${it.workerId}`)));
       [...(it.claimIds || []), ...(it.advanceIds || [])].forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: deleteField() })));
+      if ((it.loanPays || []).length) ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', it.workerId), { loanTx: { [period]: deleteField() } }, { merge: true }));
     });
     await commitOps(ops);
+    logAct('payroll.unlock', period);
     toast(L('Kunci dibuka.', 'Unlocked.'));
     drawPayrun();
   } catch (e) { toast(authErr(e), 'bad'); busy(btn, false); }
@@ -1852,6 +2052,7 @@ function drawPaySettings() {
         <select class="input" id="pLate">${opts([['none', L('Tiada', 'None')], ['perMin', L('Per minit lewat', 'Per late minute')], ['perDay', L('Per hari lewat', 'Per late day')]], P.lateMode)}</select></div>
       <div class="field"><label class="lbl">${L('Amaun (RM)', 'Amount (RM)')}</label>${num('pLateAmt', P.lateAmount)}</div>
     </div>
+    <div class="field"><label class="lbl">${L('Bonus kehadiran penuh sebulan (RM, 0 = tiada)', 'Monthly perfect attendance bonus (RM, 0 = none)')}</label>${num('pBonus', P.perfectBonus)}</div>
     <button class="btn btn-primary" id="pSave">${L('Simpan Tetapan Gaji', 'Save Payroll Settings')}</button>
   </div>`;
   $('#pSave').onclick = async (e) => {
@@ -1864,11 +2065,390 @@ function drawPaySettings() {
           otInEpf: $('#pOtEpf').checked, otInSocso: $('#pOtSo').checked,
           workDaysPerMonth: v('pWd') || 26, hoursPerDay: v('pHd') || 8,
           deductUnpaid: $('#pUnpaid').checked, deductAbsent: $('#pAbsent').checked,
-          lateMode: $('#pLate').value, lateAmount: v('pLateAmt')
+          lateMode: $('#pLate').value, lateAmount: v('pLateAmt'), perfectBonus: v('pBonus')
         }
       });
       toast(L('Tetapan gaji disimpan.', 'Payroll settings saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }
     finally { busy(e.currentTarget, false); }
   };
+}
+
+// ================================================================ DASHBOARD: ANALITIK & PERINGATAN
+async function dashExtras() {
+  const t = todayStr();
+  const from = addDays(t, -13), monthStart = t.slice(0, 8) + '01';
+  const qFrom = from < monthStart ? from : monthStart;
+  try {
+    const [att, ro, rq, files] = await Promise.all([
+      getDocs(query(sub('attendance'), where('date', '>=', qFrom), where('date', '<=', t))),
+      loadRoster(db, S.cid, t, addDays(t, 13)).catch(() => ({})),
+      getDocs(query(sub('requests'), where('status', '==', 'approved'))).catch(() => null),
+      isSupervisor() ? null : getDocs(query(sub('hrfiles'), where('expiry', '<=', addDays(t, 30)))).catch(() => null)
+    ]);
+    const recs = att.docs.map(d => d.data()).filter(r => r.type !== 'visit');
+    const wById = Object.fromEntries(S.workers.map(w => [w.id, w]));
+    // Trend 14 hari
+    const days = dateRange(from, t);
+    const per = days.map(d => {
+      const byW = {};
+      recs.filter(r => r.date === d).forEach(r => (byW[r.workerId] = byW[r.workerId] || []).push(r));
+      let p = 0, late = 0;
+      Object.entries(byW).forEach(([wid, list]) => {
+        const s = summarizeDay(list, lateSettings(S.company, resolveDay(S.company, wById[wid], d)), d);
+        if (s.firstIn) p++; if (s.lateMin) late++;
+      });
+      return { d, p, late };
+    });
+    const max = Math.max(1, ...per.map(x => x.p), S.workers.filter(w => w.active !== false).length);
+    if ($('#dTrend')) $('#dTrend').innerHTML = `
+      <div style="display:flex;align-items:flex-end;gap:4px;height:130px;padding-top:.5rem">${per.map(x => {
+        const dt = new Date(x.d + 'T00:00:00');
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px" title="${fmtDate(x.d)}: ${x.p} ${L('hadir', 'present')}, ${x.late} ${L('lewat', 'late')}">
+          <span class="xs muted">${x.p || ''}</span>
+          <div style="width:100%;height:${Math.round(x.p / max * 90)}px;background:var(--brand);border-radius:4px 4px 0 0;position:relative">
+            <div style="position:absolute;bottom:0;width:100%;height:${x.p ? Math.round(x.late / x.p * 100) : 0}%;background:var(--warn);border-radius:0 0 0 0"></div></div>
+          <span class="xs muted">${dt.getDate()}</span></div>`;
+      }).join('')}</div>
+      <div class="row xs muted" style="margin-top:.4rem"><span><span class="dot" style="display:inline-block;background:var(--brand)"></span> ${L('Hadir', 'Present')}</span><span><span class="dot" style="display:inline-block;background:var(--warn)"></span> ${L('Lewat', 'Late')}</span></div>`;
+    // Ranking bulan ini
+    const score = {};
+    const mrecs = recs.filter(r => r.date >= monthStart);
+    const byWD = {};
+    mrecs.forEach(r => { const k = r.workerId + '|' + r.date; (byWD[k] = byWD[k] || []).push(r); });
+    Object.entries(byWD).forEach(([k, list]) => {
+      const [wid, d] = k.split('|');
+      const s = summarizeDay(list, lateSettings(S.company, resolveDay(S.company, wById[wid], d)), d);
+      score[wid] = score[wid] || { p: 0, late: 0 };
+      if (s.firstIn) score[wid].p++; score[wid].late += s.lateMin;
+    });
+    const rank = Object.entries(score).filter(([wid]) => wById[wid]).sort((a, b) => b[1].p - a[1].p || a[1].late - b[1].late).slice(0, 5);
+    if ($('#dRank')) $('#dRank').innerHTML = rank.length ? rank.map(([wid, x], i) => `<div class="set-row"><span>${['🥇', '🥈', '🥉', '4.', '5.'][i]} ${esc(wById[wid].name)}</span>
+      <span class="small">${x.p} ${L('hari', 'days')} · ${L('lewat', 'late')} ${x.late}m</span></div>`).join('') : `<div class="empty small">${L('Belum ada data.', 'No data yet.')}</div>`;
+    // Ramalan 14 hari
+    const approved = rq ? rq.docs.map(d => d.data()) : [];
+    const lv = {};
+    approved.filter(r => r.kind === 'leave').forEach(r => dateRange(r.from, r.to || r.from).forEach(d => { (lv[d] = lv[d] || new Set()).add(r.workerId); }));
+    const active = S.workers.filter(w => w.active !== false);
+    const fc = dateRange(t, addDays(t, 13)).map(d => {
+      let on = 0, leave = 0;
+      active.forEach(w => {
+        const di = resolveDay(S.company, w, d, ro[d]?.[w.id]);
+        if (di.type !== 'work' && !(di.type === 'holiday' && di.shift)) return;
+        if (lv[d]?.has(w.id)) leave++; else on++;
+      });
+      return { d, on, leave };
+    });
+    if ($('#dFc')) $('#dFc').innerHTML = `<div class="table-wrap"><table><thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Bertugas', 'On duty')}</th><th>${L('Cuti', 'Leave')}</th></tr></thead>
+      <tbody>${fc.map(x => { const dt = new Date(x.d + 'T00:00:00'); const low = active.length && x.on < active.length * 0.6 && x.on + x.leave > 0;
+        return `<tr><td>${dayName(dt.getDay())} ${fmtDate(x.d, { day: 'numeric', month: 'short' })}</td><td>${low ? `<span class="badge b-bad">${x.on}</span>` : x.on}</td><td>${x.leave || '-'}</td></tr>`; }).join('')}</tbody></table></div>`;
+    // Peringatan
+    const m = t.slice(5, 7);
+    const bdays = active.filter(w => (w.dob || '').slice(5, 7) === m).sort((a, b) => a.dob.slice(8).localeCompare(b.dob.slice(8)));
+    const anniv = active.filter(w => (w.startDate || '').slice(5, 7) === m && w.startDate.slice(0, 4) < t.slice(0, 4));
+    const exp = files ? files.docs.map(d => d.data()).filter(f => f.expiry && wById[f.workerId]).sort((a, b) => a.expiry.localeCompare(b.expiry)) : [];
+    const items = [
+      ...exp.map(f => `<div class="set-row"><span>📄 ${esc(f.title)} · ${esc(wById[f.workerId].name)}</span><span class="badge ${f.expiry < t ? 'b-bad' : 'b-warn'}">${f.expiry < t ? L('Tamat', 'Expired') : L('Tamat', 'Expires')} ${fmtDate(f.expiry)}</span></div>`),
+      ...bdays.map(w => `<div class="set-row"><span>🎂 ${esc(w.name)}</span><span class="small">${fmtDate(w.dob, { day: 'numeric', month: 'short' })}</span></div>`),
+      ...anniv.map(w => `<div class="set-row"><span>🎉 ${esc(w.name)}</span><span class="small">${Number(t.slice(0, 4)) - Number(w.startDate.slice(0, 4))} ${L('tahun berkhidmat', 'years of service')}</span></div>`)
+    ];
+    if ($('#dRem')) $('#dRem').innerHTML = items.length ? items.join('') : `<div class="empty small">${L('Tiada peringatan.', 'No reminders.')}</div>`;
+  } catch (e) {
+    console.error(e);
+    ['#dTrend', '#dRem'].forEach(s => { if ($(s)) $(s).innerHTML = `<div class="empty small">${esc(authErr(e))}</div>`; });
+  }
+}
+
+// ================================================================ KAD PEKERJA
+function printCards(list) {
+  if (!window.QRCode) return toast(L('Modul QR belum dimuatkan.', 'QR module not loaded.'), 'warn');
+  const c = S.company;
+  const qr = (text) => { const d = document.createElement('div'); new QRCode(d, { text, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M }); const cv = d.querySelector('canvas'); return cv ? cv.toDataURL() : (d.querySelector('img')?.src || ''); };
+  const cards = list.map(w => `
+    <div class="card">
+      <div class="top">${c.logo ? `<img src="${c.logo}" class="lg">` : ''}<div><b>${esc(c.name)}</b><div class="s">${L('KAD PEKERJA', 'STAFF CARD')}</div></div></div>
+      <div class="mid"><div><div class="nm">${esc(w.name)}</div><div class="s">${esc(w.position || '')}</div><div class="id">${esc(w.id)}</div></div><img src="${qr('PAW|' + w.id)}" class="qr"></div>
+    </div>`).join('');
+  openPrint(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${L('Kad Pekerja', 'Staff Cards')}</title><style>
+    body{font-family:Arial,sans-serif;margin:10mm} .wrap{display:flex;flex-wrap:wrap;gap:6mm}
+    .card{width:86mm;height:54mm;border:1px solid #999;border-radius:3mm;padding:4mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;page-break-inside:avoid;border-top:3mm solid ${esc(c.color || '#1d4ed8')}}
+    .top{display:flex;gap:3mm;align-items:center;font-size:11px} .lg{width:10mm;height:10mm;object-fit:contain} .s{font-size:9px;color:#666}
+    .mid{display:flex;justify-content:space-between;align-items:flex-end} .nm{font-weight:bold;font-size:13px} .id{font-family:monospace;font-size:16px;font-weight:bold;margin-top:2mm}
+    .qr{width:24mm;height:24mm}
+  </style></head><body><div class="wrap">${cards}</div></body></html>`);
+}
+
+// ================================================================ TUGASAN
+async function viewTasks() {
+  S.taskDate = S.taskDate || todayStr();
+  const active = S.workers.filter(w => w.active !== false);
+  $('#view').innerHTML = `
+  <div class="card">
+    <h3>${L('Beri Tugasan', 'Assign Task')}</h3>
+    <div class="grid2">
+      <div class="field"><label class="lbl">${L('Pekerja', 'Staff')}</label><select class="input" id="tkW"><option value="__all">${L('Semua pekerja aktif', 'All active staff')}</option>${active.map(w => `<option value="${esc(w.id)}">${esc(w.id)} · ${esc(w.name)}</option>`).join('')}</select></div>
+      <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="tkD" value="${S.taskDate}"></div>
+    </div>
+    <div class="field"><label class="lbl">${L('Tugasan', 'Task')}</label><input class="input" id="tkT" maxlength="120"></div>
+    <div class="field"><label class="lbl">${L('Catatan (pilihan)', 'Notes (optional)')}</label><textarea class="input" id="tkN" maxlength="500" style="min-height:60px"></textarea></div>
+    <button class="btn btn-primary" id="tkAdd">${icon('plus', 18)} ${L('Beri Tugasan', 'Assign')}</button>
+  </div>
+  <div class="card"><div class="card-head"><h3>${L('Senarai Tugasan', 'Tasks')}</h3><input type="date" class="input" id="tkF" value="${S.taskDate}" style="width:auto"></div><div id="tkList"></div></div>`;
+  $('#tkF').onchange = (e) => { S.taskDate = e.target.value; drawTasks(); };
+  $('#tkAdd').onclick = async (e) => {
+    const title = $('#tkT').value.trim(), date = $('#tkD').value, sel = $('#tkW').value;
+    if (!title || !date) return toast(L('Sila isi tugasan dan tarikh.', 'Please fill in task and date.'), 'warn');
+    const targets = sel === '__all' ? active : active.filter(w => w.id === sel);
+    busy(e.currentTarget, true);
+    try {
+      await commitOps(targets.filter(w => w.uid).map(w => (b) => b.set(doc(sub('tasks')), {
+        uid: w.uid, workerId: w.id, name: w.name, title, note: $('#tkN').value.trim(), date, status: 'open', createdAt: serverTimestamp(), by: S.user.email || ''
+      })));
+      logAct('task.create', `${title} → ${targets.length}`);
+      toast(L('Tugasan diberi.', 'Task assigned.')); $('#tkT').value = ''; $('#tkN').value = '';
+      S.taskDate = date; $('#tkF').value = date; drawTasks();
+    } catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  drawTasks();
+}
+async function drawTasks() {
+  const box = $('#tkList'); if (!box) return;
+  box.innerHTML = `<div class="loader" style="min-height:80px"><span class="spin"></span></div>`;
+  try {
+    const s = await getDocs(query(sub('tasks'), where('date', '==', S.taskDate)));
+    const list = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.status === 'done') - (b.status === 'done') || a.workerId.localeCompare(b.workerId));
+    box.innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th>${L('Tugasan', 'Task')}</th><th>${L('Status', 'Status')}</th><th></th></tr></thead><tbody>
+      ${list.map(x => `<tr><td>${esc(x.name)}<div class="xs muted mono">${esc(x.workerId)}</div></td>
+        <td><b>${esc(x.title)}</b>${x.note ? `<div class="xs muted">${esc(x.note)}</div>` : ''}${x.workerNote ? `<div class="xs">💬 ${esc(x.workerNote)}</div>` : ''}</td>
+        <td>${x.status === 'done' ? `<span class="badge b-ok">${L('Siap', 'Done')} ${fmtTime(x.doneAt)}</span>` : `<span class="badge b-warn">${L('Belum', 'Open')}</span>`}
+          ${x.photo ? `<img src="${x.photo}" class="thumb" data-tph="${x.id}" style="margin-top:.3rem">` : ''}</td>
+        <td><button class="icon-btn" data-tdel="${x.id}">✕</button></td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">${L('Tiada tugasan untuk tarikh ini.', 'No tasks for this date.')}</div>`;
+    $$('[data-tph]', box).forEach(im => im.onclick = () => modal({ title: L('Gambar kerja', 'Work photo'), body: `<img src="${im.src}" style="width:100%;border-radius:10px">` }));
+    $$('[data-tdel]', box).forEach(b => b.onclick = async () => { if (await confirmBox(L('Padam tugasan ini?', 'Delete this task?'))) { await deleteDoc(doc(db, 'companies', S.cid, 'tasks', b.dataset.tdel)); drawTasks(); } });
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; }
+}
+
+// ================================================================ FAIL HR
+async function viewHR() {
+  const ws = S.workers;
+  if (!ws.length) { $('#view').innerHTML = `<div class="card"><div class="empty">${L('Tiada pekerja.', 'No staff.')}</div></div>`; return; }
+  S.hrWorker = S.hrWorker && ws.some(w => w.id === S.hrWorker) ? S.hrWorker : ws[0].id;
+  const w = ws.find(x => x.id === S.hrWorker);
+  $('#view').innerHTML = `
+  <div class="card"><div class="row between">
+    <select class="input" id="hrSel" style="max-width:340px">${ws.map(x => `<option value="${esc(x.id)}" ${x.id === w.id ? 'selected' : ''}>${esc(x.id)} · ${esc(x.name)}${x.active === false ? ' (' + L('tidak aktif', 'inactive') + ')' : ''}</option>`).join('')}</select>
+    <span class="small muted">${esc(w.position || '')} ${w.startDate ? '· ' + L('mula', 'since') + ' ' + fmtDate(w.startDate) : ''}</span>
+  </div></div>
+  <div id="hrBody"><div class="loader" style="min-height:150px"><span class="spin"></span></div></div>`;
+  $('#hrSel').onchange = (e) => { S.hrWorker = e.target.value; viewHR(); };
+  let hr = {}, files = [];
+  try {
+    const [h, f] = await Promise.all([getDoc(doc(db, 'companies', S.cid, 'hr', w.id)), getDocs(query(sub('hrfiles'), where('workerId', '==', w.id)))]);
+    hr = h.exists() ? h.data() : {};
+    files = f.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { $('#hrBody').innerHTML = `<div class="card"><div class="empty">${esc(authErr(e))}</div></div>`; return; }
+  const t = todayStr();
+  const sec = (key, title, desc, cols, rows, addLabel) => `
+    <div class="card"><div class="card-head"><div><h3>${title}</h3>${desc ? `<p class="small muted" style="margin:0">${desc}</p>` : ''}</div>
+      <div class="row"><button class="btn btn-sm btn-plus" data-hadd="${key}">${icon('plus', 16)} ${addLabel}</button><button class="btn btn-sm btn-primary" data-hsave="${key}">${L('Simpan', 'Save')}</button></div></div>
+      <div data-hbox="${key}">${rows.map(r => hrRow(key, cols, r)).join('')}</div></div>`;
+  const C = HR_COLS();
+  $('#hrBody').innerHTML = `
+    <div class="card"><div class="card-head"><h3>${L('Dokumen', 'Documents')}</h3><button class="btn btn-sm btn-plus" id="fAdd">${icon('plus', 16)} ${L('Muat naik dokumen', 'Upload document')}</button></div>
+      ${files.length ? files.sort((a, b) => (a.expiry || '9').localeCompare(b.expiry || '9')).map(f => `<div class="set-row"><div><b>${esc(f.title)}</b>
+        <div class="xs muted">${f.expiry ? `${L('Tamat', 'Expires')}: ${fmtDate(f.expiry)}` : L('Tiada tarikh tamat', 'No expiry')} ${f.expiry && f.expiry < t ? `<span class="badge b-bad">${L('Tamat', 'Expired')}</span>` : f.expiry && f.expiry <= addDays(t, 30) ? `<span class="badge b-warn">${L('Hampir tamat', 'Expiring')}</span>` : ''}</div></div>
+        <div class="row">${f.image ? `<button class="btn btn-sm btn-ghost" data-fv="${f.id}">${L('Lihat', 'View')}</button>` : ''}<button class="icon-btn" data-fd="${f.id}">✕</button></div></div>`).join('')
+        : `<div class="empty small">${L('Tiada dokumen. Contoh: IC, permit kerja, lesen, sijil.', 'No documents. E.g. IC, work permit, licence, certificate.')}</div>`}
+    </div>
+    ${sec('onboard', L('Senarai Semak Onboarding', 'Onboarding Checklist'), '', C.onboard, hr.onboard || [], L('Tambah', 'Add'))}
+    ${sec('warnings', L('Amaran & Disiplin', 'Warnings & Discipline'), '', C.warnings, hr.warnings || [], L('Tambah amaran', 'Add warning'))}
+    ${sec('reviews', L('Penilaian Prestasi', 'Performance Reviews'), L('Markah 1–5.', 'Score 1–5.'), C.reviews, hr.reviews || [], L('Tambah penilaian', 'Add review'))}
+    ${sec('assets', L('Aset Syarikat', 'Company Assets'), L('Telefon, kunci, uniform dll. yang dipegang pekerja.', 'Phones, keys, uniforms etc. held by the staff.'), C.assets, hr.assets || [], L('Tambah aset', 'Add asset'))}
+    ${sec('loans', L('Pinjaman Pekerja', 'Staff Loans'), L('Ansuran dipotong automatik dalam gaji mulai bulan dipilih.', 'Instalments are deducted automatically in payroll from the chosen month.'), C.loans,
+      (hr.loans || []).map(l => ({ ...l, _paid: loanPaid(hr, l.id) })), L('Tambah pinjaman', 'Add loan'))}
+    <div class="card"><h3>${L('Berhenti Kerja', 'Resignation / Exit')}</h3>
+      <div class="grid3">
+        <div class="field"><label class="lbl">${L('Jenis', 'Type')}</label><select class="input" id="exType">${opts([['', '—'], ['resign', L('Letak jawatan', 'Resignation')], ['terminate', L('Penamatan', 'Termination')], ['contract', L('Tamat kontrak', 'Contract end')]], hr.exit?.type || '')}</select></div>
+        <div class="field"><label class="lbl">${L('Tarikh notis', 'Notice date')}</label><input class="input" type="date" id="exNotice" value="${esc(hr.exit?.notice || '')}"></div>
+        <div class="field"><label class="lbl">${L('Hari terakhir', 'Last day')}</label><input class="input" type="date" id="exLast" value="${esc(hr.exit?.lastDay || '')}"></div>
+      </div>
+      <div class="field"><label class="lbl">${L('Catatan / gaji akhir', 'Notes / final pay')}</label><textarea class="input" id="exNote" style="min-height:60px">${esc(hr.exit?.note || '')}</textarea></div>
+      <p class="xs muted">${L('Gaji akhir: proses gaji bulan terakhir seperti biasa (kehadiran dikira sehingga hari terakhir). Nyahaktifkan pekerja selepas hari terakhir.', 'Final pay: run the last month payroll as usual (attendance counts up to the last day). Deactivate the staff after the last day.')}</p>
+      <button class="btn btn-primary btn-sm" id="exSave">${L('Simpan', 'Save')}</button>
+    </div>`;
+  const hrRef = doc(db, 'companies', S.cid, 'hr', w.id);
+  $$('[data-hadd]').forEach(b => b.onclick = () => $(`[data-hbox="${b.dataset.hadd}"]`).insertAdjacentHTML('beforeend', hrRow(b.dataset.hadd, C[b.dataset.hadd], {})));
+  $$('[data-hbox]').forEach(bx => bindDyn(bx));
+  $$('[data-hsave]').forEach(b => b.onclick = async () => {
+    const key = b.dataset.hsave, cols = C[key];
+    const rows = $$(`[data-hbox="${key}"] .dyn-row`).map(r => {
+      const o = { id: r.dataset.id || ('x' + Math.random().toString(36).slice(2, 8)) };
+      cols.forEach(c => { const i = $(`[data-k="${c.k}"]`, r); if (!i) return; o[c.k] = c.type === 'check' ? i.checked : c.type === 'number' ? Number(i.value || 0) : i.value.trim(); });
+      return o;
+    }).filter(o => cols.some(c => c.type !== 'check' && o[c.k]));
+    busy(b, true);
+    try { await setDoc(hrRef, { [key]: rows, updatedAt: serverTimestamp() }, { merge: true }); logAct('hr.' + key, w.id); toast(L('Disimpan.', 'Saved.')); }
+    catch (e) { toast(authErr(e), 'bad'); }
+    finally { busy(b, false); }
+  });
+  $('#exSave').onclick = async (e) => {
+    busy(e.currentTarget, true);
+    try {
+      await setDoc(hrRef, { exit: { type: $('#exType').value, notice: $('#exNotice').value, lastDay: $('#exLast').value, note: $('#exNote').value.trim() } }, { merge: true });
+      logAct('hr.exit', w.id); toast(L('Disimpan.', 'Saved.'));
+    } catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  $('#fAdd').onclick = () => {
+    let img = null;
+    const m = modal({
+      title: L('Muat naik dokumen', 'Upload document'),
+      body: `<div class="field"><label class="lbl">${L('Nama dokumen', 'Document name')}</label><input class="input" id="fT" placeholder="${L('cth: Permit kerja', 'e.g. Work permit')}"></div>
+        <div class="field"><label class="lbl">${L('Tarikh tamat (pilihan)', 'Expiry date (optional)')}</label><input class="input" type="date" id="fE"></div>
+        <div class="field"><label class="lbl">${L('Gambar dokumen', 'Document image')}</label><input class="input" type="file" accept="image/*" id="fI"><div id="fP"></div></div>`,
+      actions: [{ label: L('Batal', 'Cancel') }, {
+        label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
+          const title = $('#fT', el).value.trim(); if (!title) { toast(L('Sila isi nama dokumen.', 'Please enter a name.'), 'warn'); return false; }
+          try { await addDoc(sub('hrfiles'), { workerId: w.id, title, expiry: $('#fE', el).value || '', image: img, at: serverTimestamp() }); logAct('hr.file', `${w.id} ${title}`); viewHR(); }
+          catch (e) { toast(authErr(e), 'bad'); return false; }
+        }
+      }]
+    });
+    $('#fI', m.el).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; try { img = await fileToDataURL(f, 1000, 'image/jpeg', 0.6); $('#fP', m.el).innerHTML = `<img src="${img}" style="max-width:140px;border-radius:8px;margin-top:.4rem">`; } catch {} };
+  };
+  $$('[data-fv]').forEach(b => b.onclick = () => { const f = files.find(x => x.id === b.dataset.fv); modal({ title: esc(f.title), body: `<img src="${f.image}" style="width:100%;border-radius:10px">` }); });
+  $$('[data-fd]').forEach(b => b.onclick = async () => { if (await confirmBox(L('Padam dokumen ini?', 'Delete this document?'))) { await deleteDoc(doc(db, 'companies', S.cid, 'hrfiles', b.dataset.fd)); viewHR(); } });
+}
+
+const HR_COLS = () => ({
+  onboard: [{ k: 'item', ph: L('Perkara (cth: Serah salinan IC)', 'Item (e.g. Submit IC copy)') }, { k: 'done', type: 'check', label: L('Siap', 'Done') }],
+  warnings: [{ k: 'date', type: 'date' }, { k: 'level', ph: L('Tahap (cth: Lisan / Bertulis 1)', 'Level (e.g. Verbal / Written 1)') }, { k: 'reason', ph: L('Sebab', 'Reason') }],
+  reviews: [{ k: 'date', type: 'date' }, { k: 'score', type: 'number', ph: '1–5' }, { k: 'notes', ph: L('Ulasan', 'Comments') }],
+  assets: [{ k: 'name', ph: L('Aset', 'Asset') }, { k: 'serial', ph: L('No. siri', 'Serial no.') }, { k: 'issued', type: 'date' }, { k: 'returned', type: 'check', label: L('Dipulangkan', 'Returned') }],
+  loans: [{ k: 'name', ph: L('Tujuan', 'Purpose') }, { k: 'total', type: 'number', ph: L('Jumlah RM', 'Total RM') }, { k: 'monthly', type: 'number', ph: L('Sebulan RM', 'Monthly RM') }, { k: 'start', type: 'month' }, { k: 'active', type: 'check', label: L('Aktif', 'Active') }]
+});
+function hrRow(key, cols, r) {
+  return `<div class="dyn-row" data-id="${esc(r.id || '')}" style="grid-template-columns:${cols.map(c => c.type === 'check' ? 'auto' : c.type === 'date' || c.type === 'month' || c.type === 'number' ? '1fr' : '2fr').join(' ')} auto">
+    ${cols.map(c => c.type === 'check'
+      ? `<label class="check"><input type="checkbox" data-k="${c.k}" ${r[c.k] || (c.k === 'active' && r.active === undefined) ? 'checked' : ''}>${c.label}</label>`
+      : `<input class="input" data-k="${c.k}" type="${c.type || 'text'}" ${c.type === 'number' ? 'step="0.01" min="0"' : ''} placeholder="${esc(c.ph || '')}" value="${esc(r[c.k] ?? '')}">`).join('')}
+    <button type="button" class="icon-btn" data-del>✕</button>
+    ${key === 'loans' && r.total ? `<div class="xs muted" style="grid-column:1/-1">${L('Dibayar', 'Paid')}: ${money(r._paid || 0)} · ${L('Baki', 'Balance')}: ${money((r.total || 0) - (r._paid || 0))}</div>` : ''}
+  </div>`;
+}
+
+// ================================================================ ADMIN TAMBAHAN
+async function drawAdmins() {
+  const box = $('#admList'); if (!box) return;
+  try {
+    const s = await getDocs(query(collection(db, 'users'), where('cid', '==', S.cid), where('role', '==', 'admin')));
+    const list = s.docs.map(d => ({ uid: d.id, ...d.data() }));
+    box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>${L('E-mel', 'Email')}</th><th>${L('Peranan', 'Role')}</th><th></th></tr></thead><tbody>
+      ${list.map(a => `<tr><td>${esc(a.email || a.uid)}</td><td>${a.uid === S.company.ownerUid ? `<span class="badge b-brand">${L('Pemilik', 'Owner')}</span>`
+        : `<select class="input" data-perm="${a.uid}" style="width:auto;padding:.3rem .5rem">${opts([['manager', L('Pengurus', 'Manager')], ['supervisor', L('Penyelia', 'Supervisor')]], a.perm)}</select>`}</td>
+        <td>${a.uid !== S.company.ownerUid ? `<button class="icon-btn" data-adel="${a.uid}">✕</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+    $$('[data-perm]', box).forEach(sel => sel.onchange = async () => { try { await updateDoc(doc(db, 'users', sel.dataset.perm), { perm: sel.value }); logAct('admin.perm', sel.value); toast(L('Dikemas kini.', 'Updated.')); } catch (e) { toast(authErr(e), 'bad'); } });
+    $$('[data-adel]', box).forEach(b => b.onclick = async () => {
+      if (!await confirmBox(L('Buang akses admin ini?', 'Remove this admin access?'))) return;
+      try { await deleteDoc(doc(db, 'users', b.dataset.adel)); logAct('admin.remove', b.dataset.adel); drawAdmins(); } catch (e) { toast(authErr(e), 'bad'); }
+    });
+  } catch (e) { box.innerHTML = `<div class="empty small">${esc(authErr(e))}</div>`; }
+}
+function addAdmin() {
+  modal({
+    title: L('Tambah Admin', 'Add Admin'),
+    body: `<div class="field"><label class="lbl">${L('E-mel', 'Email')}</label><input class="input" type="email" id="aE"></div>
+      <div class="field"><label class="lbl">${L('Kata laluan sementara (min 6)', 'Temporary password (min 6)')}</label><input class="input" id="aP" value="${randPin()}${randPin().slice(0, 2)}"></div>
+      <div class="field"><label class="lbl">${L('Peranan', 'Role')}</label><select class="input" id="aR">${opts([['manager', L('Pengurus', 'Manager')], ['supervisor', L('Penyelia', 'Supervisor')]], 'supervisor')}</select></div>
+      <p class="xs muted">${L('Admin baharu log masuk di halaman admin dengan e-mel & kata laluan ini, kemudian boleh tukar kata laluan melalui "Lupa kata laluan".', 'The new admin logs in on the admin page with this email & password, and can change it via "Forgot password".')}</p>`,
+    actions: [{ label: L('Batal', 'Cancel') }, {
+      label: L('Tambah', 'Add'), cls: 'btn-primary', onClick: async ({ el }) => {
+        const email = $('#aE', el).value.trim(), pw = $('#aP', el).value;
+        if (!email || pw.length < 6) { toast(L('Sila isi e-mel dan kata laluan (min 6).', 'Enter email and password (min 6).'), 'warn'); return false; }
+        try {
+          const sa = getSecAuth();
+          const cred = await createUserWithEmailAndPassword(sa, email, pw);
+          await signOut(sa).catch(() => {});
+          await setDoc(doc(db, 'users', cred.user.uid), { role: 'admin', cid: S.cid, email, perm: $('#aR', el).value, createdAt: serverTimestamp() });
+          logAct('admin.add', email);
+          copyText(`${location.origin}/admin.html\n${email}\n${pw}`);
+          toast(L('Admin ditambah. Maklumat login telah disalin.', 'Admin added. Login details copied.'), 'ok', 5000);
+          drawAdmins();
+        } catch (e) {
+          toast(e.code === 'auth/email-already-in-use' ? L('E-mel ini sudah ada akaun. Guna e-mel lain.', 'This email already has an account. Use another email.') : authErr(e), 'bad', 6000);
+          return false;
+        }
+      }
+    }]
+  });
+}
+
+// ================================================================ LOG & SANDARAN
+async function showLogs() {
+  const m = modal({ title: L('Log Perubahan', 'Change Log'), wide: true, body: `<div class="loader" style="min-height:100px"><span class="spin"></span></div>` });
+  try {
+    const s = await getDocs(query(sub('logs'), orderBy('at', 'desc'), limit(200)));
+    $('.modal-body', m.el).innerHTML = s.empty ? `<div class="empty">${L('Tiada log.', 'No logs.')}</div>` : `<div class="table-wrap"><table>
+      <thead><tr><th>${L('Masa', 'Time')}</th><th>${L('Oleh', 'By')}</th><th>${L('Tindakan', 'Action')}</th><th>${L('Butiran', 'Details')}</th></tr></thead>
+      <tbody>${s.docs.map(d => { const x = d.data(); return `<tr><td class="small">${fmtDateTime(x.at)}</td><td class="small">${esc(x.email)}${x.support ? ' <span class="badge b-warn">support</span>' : ''}</td><td class="mono small">${esc(x.action)}</td><td class="small">${esc(x.detail)}</td></tr>`; }).join('')}</tbody></table></div>`;
+  } catch (e) { $('.modal-body', m.el).innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; }
+}
+async function backupAll(btn) {
+  busy(btn, true);
+  try {
+    const cols = ['workers', 'locations', 'roster', 'requests', 'attendance', 'payruns', 'payslips', 'announcements', 'tasks', 'hr', 'hrfiles'];
+    const out = { exportedAt: new Date().toISOString(), company: S.company };
+    for (const c of cols) {
+      try { const s = await getDocs(sub(c)); out[c] = s.docs.map(d => ({ _id: d.id, ...d.data() })); } catch { out[c] = []; }
+    }
+    const blob = new Blob([JSON.stringify(out, (k, v) => (v && typeof v === 'object' && typeof v.toDate === 'function') ? v.toDate().toISOString() : v, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Sandaran_${S.company.code}_${todayStr()}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    logAct('backup.export');
+  } catch (e) { toast(authErr(e), 'bad'); }
+  finally { busy(btn, false); }
+}
+
+// ================================================================ RINGKASAN TAHUNAN (EA)
+async function drawEA() {
+  S.eaYear = S.eaYear || String(new Date().getFullYear());
+  const box = $('#payBody');
+  box.innerHTML = `<div class="card"><div class="row between"><div class="row"><label class="lbl" style="margin:0">${L('Tahun', 'Year')}</label>
+    <input class="input" type="number" id="eaY" value="${S.eaYear}" style="width:110px"></div>
+    <button class="btn btn-sm btn-ghost" id="eaPrint">${icon('print', 16)} ${L('Cetak semua penyata', 'Print all statements')}</button></div>
+    <p class="xs muted">${L('Ringkasan daripada slip gaji yang telah dikunci — untuk membantu mengisi Borang EA rasmi LHDN. Ini bukan Borang EA rasmi.', 'Summary from locked payslips — to help you fill the official LHDN EA form. This is not the official EA form.')}</p>
+    <div id="eaOut"><div class="loader" style="min-height:100px"><span class="spin"></span></div></div></div>`;
+  $('#eaY').onchange = (e) => { S.eaYear = e.target.value; drawEA(); };
+  try {
+    const y = S.eaYear;
+    const s = await getDocs(query(sub('payslips'), where('period', '>=', `${y}-01`), where('period', '<=', `${y}-12`)));
+    const by = {};
+    s.docs.map(d => d.data()).forEach(x => {
+      const k = x.workerId; const ded = (kind) => (x.deductions || []).filter(d => d.kind === kind).reduce((a, d) => a + d.amount, 0);
+      const o = by[k] = by[k] || { workerId: k, name: x.name, ic: x.ic, taxNo: x.taxNo, epfNo: x.epfNo, months: 0, gross: 0, epf: 0, socso: 0, eis: 0, pcb: 0, net: 0, erEpf: 0 };
+      o.months++; o.gross += x.gross || 0; o.epf += ded('epf'); o.socso += ded('socso'); o.eis += ded('eis'); o.pcb += ded('pcb'); o.net += x.net || 0; o.erEpf += x.employer?.epf || 0;
+    });
+    const list = Object.values(by).sort((a, b) => a.workerId.localeCompare(b.workerId));
+    $('#eaOut').innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>ID</th><th>${L('Nama', 'Name')}</th><th>${L('Bulan', 'Months')}</th><th class="right">${L('Saraan kasar', 'Gross')}</th>
+      <th class="right">${L('KWSP', 'EPF')}</th><th class="right">${L('PERKESO', 'SOCSO')}</th><th class="right">${L('SIP', 'EIS')}</th><th class="right">PCB</th><th></th></tr></thead><tbody>
+      ${list.map((o, i) => `<tr><td class="mono">${esc(o.workerId)}</td><td>${esc(o.name)}</td><td>${o.months}</td><td class="right">${money(o.gross)}</td><td class="right">${money(o.epf)}</td><td class="right">${money(o.socso)}</td><td class="right">${money(o.eis)}</td><td class="right">${money(o.pcb)}</td>
+        <td><button class="btn btn-sm btn-ghost" data-ea="${i}">${icon('print', 14)}</button></td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty">${L('Tiada slip gaji dikunci untuk tahun ini.', 'No locked payslips for this year.')}</div>`;
+    const stmt = (arr) => {
+      const c = S.company;
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>EA ${y}</title><style>body{font-family:Arial,sans-serif;font-size:12px;margin:20px}
+        .p{page-break-after:always;max-width:700px;margin:0 auto} .p:last-child{page-break-after:auto} table{width:100%;border-collapse:collapse;margin-top:10px} td{padding:6px;border:1px solid #ccc} .r{text-align:right} h2{margin:4px 0}</style></head><body>
+        ${arr.map(o => `<div class="p">${c.logo ? `<img src="${c.logo}" style="height:50px">` : ''}<h2>${esc(c.name)}</h2><div>${esc(c.address || '')}</div>
+          <h3>${L('PENYATA SARAAN TAHUNAN', 'ANNUAL REMUNERATION STATEMENT')} ${y}</h3><p style="color:#666">${L('Ringkasan untuk rujukan pengisian Borang EA (bukan Borang EA rasmi).', 'Summary for reference when filling the EA form (not the official EA form).')}</p>
+          <table><tr><td>${L('Nama', 'Name')}</td><td>${esc(o.name)}</td></tr><tr><td>${L('No. IC', 'IC No.')}</td><td>${esc(o.ic || '')}</td></tr><tr><td>${L('No. Cukai', 'Tax No.')}</td><td>${esc(o.taxNo || '')}</td></tr><tr><td>${L('No. KWSP', 'EPF No.')}</td><td>${esc(o.epfNo || '')}</td></tr></table>
+          <table><tr><td>${L('Jumlah saraan kasar', 'Total gross remuneration')} (${o.months} ${L('bulan', 'months')})</td><td class="r">${money(o.gross)}</td></tr>
+          <tr><td>${L('Caruman KWSP pekerja', 'Employee EPF')}</td><td class="r">${money(o.epf)}</td></tr><tr><td>${L('Caruman PERKESO pekerja', 'Employee SOCSO')}</td><td class="r">${money(o.socso)}</td></tr>
+          <tr><td>${L('Caruman SIP pekerja', 'Employee EIS')}</td><td class="r">${money(o.eis)}</td></tr><tr><td>${L('PCB dipotong', 'PCB deducted')}</td><td class="r">${money(o.pcb)}</td></tr>
+          <tr><td>${L('Caruman KWSP majikan', 'Employer EPF')}</td><td class="r">${money(o.erEpf)}</td></tr></table></div>`).join('')}</body></html>`;
+    };
+    $$('[data-ea]').forEach(b => b.onclick = () => openPrint(stmt([list[Number(b.dataset.ea)]])));
+    $('#eaPrint').onclick = () => list.length && openPrint(stmt(list));
+  } catch (e) { $('#eaOut').innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; }
 }

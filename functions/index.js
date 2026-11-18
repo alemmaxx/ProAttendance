@@ -5,6 +5,8 @@ const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+const { getMessaging } = require('firebase-admin/messaging');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 
 initializeApp();
 const db = getFirestore('proattendance');
@@ -69,6 +71,17 @@ exports.pa_createBill = onCall({ region: REGION, secrets: [TOYYIB_KEY] }, async 
   if (!(price > 0)) throw new HttpsError('failed-precondition', 'Harga pakej belum ditetapkan.');
 
   const comp = (await db.doc(`companies/${me.cid}`).get()).data() || {};
+  // Kod promo diskaun (%)
+  let promo = '', discount = 0, price0 = price;
+  const pcode = String(req.data?.promo || '').trim().toUpperCase();
+  if (pcode) {
+    const ps = await db.doc(`promos/${pcode}`).get();
+    const pd = ps.exists ? ps.data() : null;
+    if (!pd || pd.used || pd.type !== 'percent') throw new HttpsError('failed-precondition', 'Kod promo tidak sah atau telah digunakan.');
+    discount = Math.min(100, Number(pd.value || 0)); promo = pcode;
+  }
+  const finalPrice = Math.round(price0 * (100 - discount)) / 100;
+  if (!(finalPrice >= 1)) throw new HttpsError('failed-precondition', 'Jumlah selepas diskaun terlalu rendah. Hubungi kami.');
   const ref = db.collection('payments').doc();
   const project = process.env.GCLOUD_PROJECT || JSON.parse(process.env.FIREBASE_CONFIG || '{}').projectId;
   const phone = String(comp.phone || '').replace(/\D/g, '') || '0123456789';
@@ -80,7 +93,7 @@ exports.pa_createBill = onCall({ region: REGION, secrets: [TOYYIB_KEY] }, async 
     billDescription: clean(`${comp.name || ''} ${comp.code || ''} langganan ${months} bulan`, 100),
     billPriceSetting: '1',
     billPayorInfo: '1',
-    billAmount: String(Math.round(price * 100)),
+    billAmount: String(Math.round(finalPrice * 100)),
     billReturnUrl: `${SITE}/admin.html?pay=${ref.id}`,
     billCallbackUrl: `https://${REGION}-${project}.cloudfunctions.net/pa_toyyibCallback`,
     billExternalReferenceNo: ref.id,
@@ -101,7 +114,7 @@ exports.pa_createBill = onCall({ region: REGION, secrets: [TOYYIB_KEY] }, async 
   }
 
   await ref.set({
-    cid: me.cid, plan, months, amount: price, billCode, status: 'pending',
+    cid: me.cid, plan, months, amount: finalPrice, listPrice: price0, promo, discount, ref: comp.ref || '', billCode, status: 'pending',
     email: req.auth.token.email || '', createdAt: FieldValue.serverTimestamp()
   });
   return { url: `${TOYYIB}/${billCode}`, id: ref.id };
@@ -139,6 +152,7 @@ async function settle(paymentId) {
     const base = new Date(Math.max(Date.now(), cur));
     base.setMonth(base.getMonth() + Number(p.months || 1));
     t.update(cRef, { expiry: Timestamp.fromDate(base), status: 'active', plan: p.plan, lastPaidAt: FieldValue.serverTimestamp() });
+    if (p.promo) t.set(db.doc(`promos/${p.promo}`), { used: true, usedBy: p.cid, usedByName: cs.data()?.name || '', usedAt: FieldValue.serverTimestamp() }, { merge: true });
     t.update(pRef, {
       status: 'paid', paidAt: FieldValue.serverTimestamp(),
       refNo: paid.billpaymentInvoiceNo || '', newExpiry: Timestamp.fromDate(base)
@@ -167,4 +181,69 @@ exports.pa_checkPayment = onCall({ region: REGION }, async (req) => {
   const s = await db.doc(`payments/${id}`).get();
   if (!s.exists || s.data().cid !== me.cid) throw new HttpsError('not-found', 'Bayaran tidak dijumpai.');
   return settle(id);
+});
+
+// ---------------------------------------------------------------- Kod promo
+// Jenis 'days' → terus tambah hari langganan. Jenis 'percent' → disahkan sahaja; digunakan semasa bayar.
+exports.pa_redeemPromo = onCall({ region: REGION }, async (req) => {
+  const me = await requireAdmin(req);
+  const code = String(req.data?.code || '').trim().toUpperCase();
+  if (!/^[A-Z0-9-]{4,30}$/.test(code)) throw new HttpsError('invalid-argument', 'Kod promo tidak sah.');
+  const pRef = db.doc(`promos/${code}`);
+  return db.runTransaction(async (t) => {
+    const ps = await t.get(pRef);
+    const p = ps.exists ? ps.data() : null;
+    if (!p || p.used) throw new HttpsError('failed-precondition', 'Kod promo tidak sah atau telah digunakan.');
+    if (p.type === 'percent') return { type: 'percent', value: Number(p.value || 0) };
+    const days = Number(p.value || 0);
+    if (!(days > 0)) throw new HttpsError('failed-precondition', 'Kod promo tidak sah.');
+    const cRef = db.doc(`companies/${me.cid}`);
+    const cs = await t.get(cRef);
+    const cur = cs.data()?.expiry?.toMillis?.() || 0;
+    const base = new Date(Math.max(Date.now(), cur));
+    base.setDate(base.getDate() + days);
+    t.update(cRef, { expiry: Timestamp.fromDate(base) });
+    t.update(pRef, { used: true, usedBy: me.cid, usedByName: cs.data()?.name || '', usedAt: FieldValue.serverTimestamp() });
+    return { type: 'days', value: days, expiry: base.toISOString() };
+  });
+});
+
+// ---------------------------------------------------------------- Notifikasi push
+const KIND = { leave: 'Cuti', ot: 'OT', fix: 'Pembetulan punch', claim: 'Tuntutan', advance: 'Pendahuluan gaji', swap: 'Tukar syif' };
+const TRIG = (document) => ({ document, database: 'proattendance', region: REGION });
+
+async function sendTo(cid, filter, title, body, link) {
+  const s = await db.collection(`companies/${cid}/tokens`).get();
+  const list = s.docs.map(d => ({ id: d.id, ...d.data() })).filter(filter).filter(t => t.token);
+  if (!list.length) return;
+  const res = await getMessaging().sendEachForMulticast({
+    tokens: list.map(t => t.token),
+    webpush: { notification: { title, body, icon: '/icon-192.png' }, fcmOptions: { link: SITE + link } }
+  });
+  // Buang token yang tidak sah lagi
+  await Promise.all(res.responses.map((r, i) => (!r.success && /registration-token-not-registered|invalid-argument/.test(r.error?.code || ''))
+    ? db.doc(`companies/${cid}/tokens/${list[i].id}`).delete().catch(() => {}) : null));
+}
+
+exports.pa_onRequestCreated = onDocumentCreated(TRIG('companies/{cid}/requests/{rid}'), async (e) => {
+  const r = e.data?.data(); if (!r) return;
+  await sendTo(e.params.cid, t => t.role === 'admin', 'Permohonan baharu', `${r.name}: ${KIND[r.kind] || r.kind}`, '/admin.html');
+});
+
+exports.pa_onRequestUpdated = onDocumentUpdated(TRIG('companies/{cid}/requests/{rid}'), async (e) => {
+  const b = e.data?.before?.data(), a = e.data?.after?.data();
+  if (!a || !b || a.status === b.status || !['approved', 'rejected'].includes(a.status)) return;
+  await sendTo(e.params.cid, t => t.id === a.uid,
+    a.status === 'approved' ? 'Permohonan diluluskan ✓' : 'Permohonan ditolak',
+    `${KIND[a.kind] || a.kind}${a.adminNote ? ' — ' + a.adminNote : ''}`, '/index.html');
+});
+
+exports.pa_onAnnouncement = onDocumentCreated(TRIG('companies/{cid}/announcements/{aid}'), async (e) => {
+  const a = e.data?.data(); if (!a) return;
+  await sendTo(e.params.cid, t => t.role === 'worker', a.title || 'Pengumuman', String(a.body || '').slice(0, 140), '/index.html');
+});
+
+exports.pa_onTask = onDocumentCreated(TRIG('companies/{cid}/tasks/{tid}'), async (e) => {
+  const x = e.data?.data(); if (!x) return;
+  await sendTo(e.params.cid, t => t.id === x.uid, 'Tugasan baharu', x.title || '', '/index.html');
 });
