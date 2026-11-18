@@ -4,12 +4,12 @@
 //  Firebase Console → Project settings → General → Your apps → Config
 // =====================================================================
 export const FIREBASE_CONFIG = {
-  apiKey: "ISI_API_KEY",
+  apiKey: "AIzaSyDIncQ3Nt6v6_WbMCs42t81DZVg6f35Hwc",
   authDomain: "kukusanmy.firebaseapp.com",
   projectId: "kukusanmy",
-  storageBucket: "kukusanmy.appspot.com",
-  messagingSenderId: "ISI_SENDER_ID",
-  appId: "ISI_APP_ID"
+  storageBucket: "kukusanmy.firebasestorage.app",
+  messagingSenderId: "710803283811",
+  appId: "1:710803283811:web:4ceb3dbabf376b7a39fd56"
 };
 
 // Firestore database khas ProAttendance (data berasingan dari KUKUSAN & ProSewa)
