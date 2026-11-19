@@ -8,7 +8,7 @@ import {
   doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
-  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
+  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
   summarizeDay, TYPE_LABEL, METHOD_LABEL, haversine, getPosition, getDeviceId, takeSelfie, scanQR, verifyQr,
   applyBrand, logoHtml, isExpired, authErr, icon, fileToDataURL, punchTime
 } from './ui.js';
@@ -250,7 +250,7 @@ function renderShell() {
   $$('.bnav button').forEach(b => b.onclick = () => go(b.dataset.tab));
   go(S.tab);
 }
-document.addEventListener('langchange', () => { if (S.worker && $('#view')) renderShell(); });
+document.addEventListener('langchange', () => { if (S.worker && $('#view')) renderShell(); else if ($('.login-wrap')) keepInputs(renderLogin); });
 
 function go(tab) {
   S.tab = tab;

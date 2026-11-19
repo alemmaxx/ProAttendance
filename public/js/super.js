@@ -8,7 +8,7 @@ import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit, serverTimestamp, Timestamp, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
-  $, $$, L, esc, toast, modal, confirmBox, busy, langBtn, fmtDate, fmtDateTime, toDate, isExpired, daysLeft,
+  $, $$, L, esc, toast, modal, confirmBox, busy, langBtn, keepInputs, fmtDate, fmtDateTime, toDate, isExpired, daysLeft,
   money, authErr, icon, applyBrand, copyText, todayStr
 } from './ui.js';
 
@@ -103,7 +103,7 @@ function renderShell() {
   $('#lo').onclick = () => signOut(auth);
   go(S.view);
 }
-document.addEventListener('langchange', () => { if (S.user && $('.shell')) renderShell(); });
+document.addEventListener('langchange', () => { if (S.user && $('.shell')) renderShell(); else if ($('.login-wrap')) keepInputs(renderLogin); });
 
 function go(v) {
   S.view = v;

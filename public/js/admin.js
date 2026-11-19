@@ -11,7 +11,7 @@ import {
   onSnapshot, serverTimestamp, writeBatch, runTransaction, increment, Timestamp, deleteField
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
-  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
+  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
   minsToHM, dayName, addDays, summarizeDay, TYPE_LABEL, METHOD_LABEL, getPosition, mapLink, applyBrand, logoHtml,
   isExpired, daysLeft, randPin, randSecret, money, copyText, authErr, icon, fileToDataURL
 } from './ui.js';
@@ -61,6 +61,7 @@ const opts = (arr, sel) => arr.map(([v, t]) => `<option value="${esc(v)}" ${v ==
 
 // ================================================================ AUTH
 function renderAuth(mode = 'login') {
+  S.screen = ['auth', mode];
   stopAll();
   applyBrand({ color: '#d9b44a' });
   const titles = {
@@ -130,8 +131,10 @@ function renderAuth(mode = 'login') {
   };
 }
 document.addEventListener('langchange', () => {
-  if (!S.user) renderAuth();
-  else if (S.company) { renderShell(); }
+  if (S.user && S.company && $('.shell')) return renderShell();
+  const [k, arg] = S.screen || [];
+  if (k === 'onb') keepInputs(() => renderOnboarding(arg));
+  else if (!S.user || k === 'auth') keepInputs(() => renderAuth(arg || 'login'));
 });
 
 function stopAll() {
@@ -178,6 +181,7 @@ function suggestCode(name) {
   return c.slice(0, 4).padEnd(3, 'X').slice(0, 6);
 }
 function renderOnboarding(extra = false) {
+  S.screen = ['onb', extra];
   const td = Number(S.plans.trialDays || 14);
   app.innerHTML = `
   <div class="login-wrap">
@@ -307,6 +311,7 @@ const NAV = () => [
  .filter(([k]) => k !== 'billing' || isOwner());
 
 function renderShell() {
+  S.screen = ['shell'];
   const c = S.company;
   app.innerHTML = `
   <div class="shell">

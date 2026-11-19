@@ -21,6 +21,13 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-lang-toggle]');
   if (b) setLang(getLang() === 'en' ? 'ms' : 'en');
 });
+// Lukis semula skrin selepas tukar bahasa tanpa hilang nilai yang sudah ditaip
+export function keepInputs(fn) {
+  const vals = {};
+  $$('input[id],select[id],textarea[id]').forEach(el => { if (el.type !== 'password' && el.type !== 'file') vals[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+  fn();
+  Object.entries(vals).forEach(([id, v]) => { const el = document.getElementById(id); if (!el) return; if (el.type === 'checkbox') el.checked = v; else if (v !== '') { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } });
+}
 export const langBtn = () => `<button type="button" class="lang-btn" data-lang-toggle>${getLang() === 'en' ? 'BM' : 'EN'}</button>`;
 
 // ---------- Teks selamat ----------
