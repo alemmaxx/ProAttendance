@@ -630,13 +630,13 @@ function renderWorkerList() {
   $$('[data-more]', box).forEach(b => b.onclick = () => workerMenu(S.workers.find(w => w.id === b.dataset.more)));
 }
 
-function allowRow(a = {}) {
-  return `<div class="dyn-row" data-row="allow">
-    <input class="input" data-k="name" placeholder="${L('Nama elaun', 'Allowance name')}" value="${esc(a.name || '')}">
+function allowRow(a = {}, finance = false) {
+  return `<div class="dyn-row${finance ? '' : ' ded'}" data-row="allow">
+    <input class="input" data-k="name" ${finance ? '' : 'list="allowList"'} placeholder="${L('Nama elaun', 'Allowance name')}" value="${esc(a.name || '')}">
     <input class="input" data-k="amount" type="number" step="0.01" min="0" placeholder="RM" value="${a.amount ?? ''}">
     <select class="input" data-k="type">${opts(ALLOW_TYPES(), a.type || 'monthly')}</select>
-    <label class="check"><input type="checkbox" data-k="epf" ${a.epf ? 'checked' : ''}>${L('KWSP', 'EPF')}</label>
-    <label class="check"><input type="checkbox" data-k="socso" ${a.socso ? 'checked' : ''}>${L('PERKESO', 'SOCSO')}</label>
+    ${finance ? `<label class="check"><input type="checkbox" data-k="epf" ${a.epf ? 'checked' : ''}>${L('KWSP', 'EPF')}</label>
+    <label class="check"><input type="checkbox" data-k="socso" ${a.socso ? 'checked' : ''}>${L('PERKESO', 'SOCSO')}</label>` : ''}
     <button type="button" class="icon-btn" data-del>✕</button>
   </div>`;
 }
@@ -713,14 +713,9 @@ function workerForm(w) {
           <td><input class="input" type="number" min="0" step="0.5" data-carry="${esc(lt.id)}" value="${w.leaveCarry?.[lt.id] ?? ''}" placeholder="0" style="max-width:110px"></td></tr>`).join('')}</tbody>
       </table></div>
       <p class="xs muted">${L('Kosongkan untuk guna nilai lalai syarikat.', 'Leave blank to use the company default.')}</p>
-      <div class="sec-title">${L('Caruman Bulanan (RM) — pilihan', 'Monthly Contributions (RM) — optional')}</div>
-      <p class="xs muted" style="margin-top:-.3rem">${L('Isi amaun tetap ikut jadual rasmi jika mahu. Kosongkan untuk kira ikut peratus dalam Gaji → Tetapan Gaji.', 'Enter fixed amounts from the official tables if you wish. Leave blank to use the percentages in Payroll → Settings.')}</p>
-      <div class="grid3">${[
-        ['epfEe', L('KWSP pekerja', 'EPF employee')], ['epfEr', L('KWSP majikan', 'EPF employer')], ['pcb', L('PCB / cukai', 'PCB / tax')],
-        ['socsoEe', L('PERKESO pekerja', 'SOCSO employee')], ['socsoEr', L('PERKESO majikan', 'SOCSO employer')], ['eisEe', L('SIP pekerja', 'EIS employee')],
-        ['eisEr', L('SIP majikan', 'EIS employer')]
-      ].map(([k, t]) => `<div class="field"><label class="lbl">${t}</label><input class="input" type="number" step="0.01" min="0" data-st="${k}" value="${w.statutory?.[k] ?? ''}" placeholder="${L('auto', 'auto')}"></div>`).join('')}</div>
       <div class="sec-title">${L('Elaun', 'Allowances')}</div>
+      <p class="xs muted" style="margin-top:-.3rem">${L('KWSP / PERKESO untuk setiap elaun ditetapkan oleh finance di Gaji → Tetapan Kewangan.', 'EPF / SOCSO for each allowance is set by finance in Payroll → Finance Settings.')}</p>
+      <datalist id="allowList">${tpls.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
       <div id="allowBox">${(w.allowances || []).map(allowRow).join('')}</div>
       <div class="row">
         <button type="button" class="btn btn-sm btn-plus" id="addAllow">${icon('plus', 16)} ${L('Tambah Elaun', 'Add Allowance')}</button>
@@ -760,7 +755,7 @@ async function saveWorker(el, w) {
     workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],
     leaveEntitle: Object.fromEntries($$('[data-ent]', el).filter(x => x.value !== '').map(x => [x.dataset.ent, Number(x.value)])),
     leaveCarry: Object.fromEntries($$('[data-carry]', el).filter(x => x.value !== '').map(x => [x.dataset.carry, Number(x.value)])),
-    statutory: Object.fromEntries($$('[data-st]', el).filter(x => x.value !== '').map(x => [x.dataset.st, Number(x.value)]))
+    statutory: {}
   };
   try {
     if (w) {
@@ -1219,31 +1214,6 @@ function viewSettings() {
   </div>
 
   <div class="card">
-    <h3>${L('Templat Elaun Syarikat', 'Company Allowance Templates')}</h3>
-    <p class="small muted">${L('Tetapkan elaun biasa sekali, kemudian pilih untuk setiap pekerja dengan butang (+).', 'Set common allowances once, then add them to staff with the (+) button.')}</p>
-    <div id="tplBox">${(c.allowanceTemplates || []).map(allowRow).join('')}</div>
-    <div class="row"><button class="btn btn-sm btn-plus" id="tplAdd">${icon('plus', 16)} ${L('Tambah Templat Elaun', 'Add Allowance Template')}</button>
-      <button class="btn btn-primary btn-sm" id="tplSave">${L('Simpan Templat', 'Save Templates')}</button></div>
-  </div>
-
-  <div class="card">
-    <h3>${L('Borang Tuntutan — Kadar & Projek', 'Claim Form — Rates & Projects')}</h3>
-    <p class="small muted">${L('Kadar ini digunakan dalam borang tuntutan bulanan pekerja (Justification, Allowance & Claim Form).', 'These rates are used in the staff monthly claim form (Justification, Allowance & Claim Form).')}</p>
-    <div class="grid3">
-      <div class="field"><label class="lbl">Mileage (RM/km)</label><input class="input" type="number" step="0.01" min="0" id="crKm" value="${claimRates(c).km}"></div>
-      <div class="field"><label class="lbl">Outstation (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOut" value="${claimRates(c).outstation}"></div>
-      <div class="field"><label class="lbl">Overnight (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOver" value="${claimRates(c).overnight}"></div>
-      <div class="field"><label class="lbl">Mileage allowance offset (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOff" value="${claimRates(c).offset}"></div>
-      <div class="field"><label class="lbl">SST (%)</label><input class="input" type="number" step="0.1" min="0" id="crSst" value="${claimRates(c).sst}"></div>
-    </div>
-    <button class="btn btn-primary btn-sm" id="crSave">${L('Simpan Kadar', 'Save Rates')}</button>
-    <div class="sec-title">${L('Senarai Projek (Purpose of Journey / Remark)', 'Project List (Purpose of Journey / Remark)')}</div>
-    <div class="chips" id="prjChips" style="margin-bottom:.7rem"></div>
-    <div class="row"><input class="input grow" id="prjIn" style="max-width:340px" placeholder="${L('Nama projek', 'Project name')}">
-      <button class="btn btn-plus" id="prjAdd">${icon('plus', 16)} ${L('Tambah', 'Add')}</button></div>
-  </div>
-
-  <div class="card">
     <h3>${L('Jenis Cuti', 'Leave Types')}</h3>
     <p class="small muted">${L('Kelayakan lalai setahun. Boleh diubah untuk setiap pekerja.', 'Default yearly entitlement. Can be changed per staff.')}</p>
     <div id="ltBox">${leaveTypes(c).map(ltRow).join('')}</div>
@@ -1262,17 +1232,6 @@ function viewSettings() {
       <button class="btn btn-primary btn-sm" id="holSave">${L('Simpan', 'Save')}</button>
     </div>
     <p class="xs muted" style="margin-top:.5rem">${L('Cuti agama (Hari Raya, CNY, Deepavali dll.) berubah setiap tahun — sila tambah sendiri ikut kalendar rasmi negeri anda.', 'Religious holidays (Hari Raya, CNY, Deepavali etc.) change yearly — add them from your state\'s official calendar.')}</p>
-  </div>
-
-  <div class="card">
-    <h3>${L('Kadar OT', 'Overtime Rates')}</h3>
-    <p class="small muted">${L('Gandaan kadar sejam. Isi ikut polisi syarikat anda.', 'Multiplier of the hourly rate. Set according to your company policy.')}</p>
-    <div class="grid3">
-      <div class="field"><label class="lbl">${L('Hari biasa', 'Normal day')}</label><input class="input" type="number" step="0.1" min="0" id="otN" value="${otRates(c).normal}"></div>
-      <div class="field"><label class="lbl">${L('Hari rehat', 'Rest day')}</label><input class="input" type="number" step="0.1" min="0" id="otR" value="${otRates(c).rest}"></div>
-      <div class="field"><label class="lbl">${L('Cuti umum', 'Public holiday')}</label><input class="input" type="number" step="0.1" min="0" id="otH" value="${otRates(c).holiday}"></div>
-    </div>
-    <button class="btn btn-primary btn-sm" id="otSave">${L('Simpan', 'Save')}</button>
   </div>
 
   ${isOwner() ? `<div class="card">
@@ -1364,14 +1323,6 @@ function viewSettings() {
     const arr = [...new Set([...(S.company.departments || []), v])];
     await updateDoc(cRef(), { departments: arr }); S.company.departments = arr; $('#deptIn').value = ''; drawDepts();
   };
-  const tplBox = $('#tplBox'); bindDyn(tplBox);
-  $('#tplAdd').onclick = () => tplBox.insertAdjacentHTML('beforeend', allowRow());
-  $('#tplSave').onclick = async (e) => {
-    busy(e.currentTarget, true);
-    try { await updateDoc(cRef(), { allowanceTemplates: readRows(tplBox, 'allow') }); toast(L('Templat disimpan.', 'Templates saved.')); }
-    catch (err) { toast(authErr(err), 'bad'); }
-    finally { busy(e.currentTarget, false); }
-  };
   $('#cpLink').onclick = () => copyText(location.origin);
 
   $('#logBtn').onclick = showLogs;
@@ -1388,28 +1339,6 @@ function viewSettings() {
   });
   $('#bkBtn').onclick = (e) => backupAll(e.currentTarget);
   if ($('#admList')) { drawAdmins(); $('#admAdd').onclick = addAdmin; }
-
-  // Kadar tuntutan & projek
-  $('#crSave').onclick = async (e) => {
-    const v = (id) => Number($('#' + id).value || 0);
-    busy(e.currentTarget, true);
-    try {
-      await updateDoc(cRef(), { claimRates: { km: v('crKm'), outstation: v('crOut'), overnight: v('crOver'), offset: v('crOff'), sst: v('crSst') } });
-      logAct('settings.claimRates'); toast(L('Kadar disimpan.', 'Rates saved.'));
-    } catch (err) { toast(authErr(err), 'bad'); }
-    finally { busy(e.currentTarget, false); }
-  };
-  const drawPrj = () => {
-    const d = S.company.projects || [];
-    $('#prjChips').innerHTML = d.length ? d.map((x, i) => `<span class="chip">${esc(x)}<button data-pdx="${i}">✕</button></span>`).join('') : `<span class="small muted">${L('Tiada projek.', 'No projects.')}</span>`;
-    $$('[data-pdx]').forEach(b => b.onclick = async () => { const arr = [...(S.company.projects || [])]; arr.splice(Number(b.dataset.pdx), 1); await updateDoc(cRef(), { projects: arr }); S.company.projects = arr; drawPrj(); });
-  };
-  drawPrj();
-  $('#prjAdd').onclick = async () => {
-    const v = $('#prjIn').value.trim(); if (!v) return;
-    const arr = [...new Set([...(S.company.projects || []), v])];
-    await updateDoc(cRef(), { projects: arr }); S.company.projects = arr; $('#prjIn').value = ''; drawPrj();
-  };
 
   // Jenis cuti
   const ltBox = $('#ltBox'); bindDyn(ltBox);
@@ -1444,14 +1373,6 @@ function viewSettings() {
     finally { busy(e.currentTarget, false); }
   };
   // Kadar OT
-  $('#otSave').onclick = async (e) => {
-    busy(e.currentTarget, true);
-    try {
-      await updateDoc(cRef(), { otRates: { normal: Number($('#otN').value || 0), rest: Number($('#otR').value || 0), holiday: Number($('#otH').value || 0) } });
-      toast(L('Kadar OT disimpan.', 'OT rates saved.'));
-    } catch (err) { toast(authErr(err), 'bad'); }
-    finally { busy(e.currentTarget, false); }
-  };
 }
 
 function ltRow(t = {}) {
@@ -1844,7 +1765,7 @@ function viewPayroll() {
     <div class="tabs">
       <button data-ptab="run">${L('Proses Gaji', 'Run Payroll')}</button>
       <button data-ptab="ea">${L('Ringkasan Tahunan (EA)', 'Yearly Summary (EA)')}</button>
-      <button data-ptab="settings">${L('Tetapan Gaji', 'Payroll Settings')}</button>
+      <button data-ptab="settings">${L('Tetapan Kewangan', 'Finance Settings')}</button>
     </div>
     <div id="payBody"></div>`;
   $$('[data-ptab]').forEach(b => {
@@ -2153,12 +2074,12 @@ function bankFile(period, items) {
 }
 
 function drawPaySettings() {
-  const P = payrollSettings(S.company);
+  const P = payrollSettings(S.company), c = S.company;
   const num = (id, v, step = '0.01') => `<input class="input" type="number" step="${step}" min="0" id="${id}" value="${v}">`;
   $('#payBody').innerHTML = `
   <div class="card">
     <h3>${L('Kadar Caruman (peratus)', 'Contribution Rates (percent)')}</h3>
-    <p class="small muted">${L('Isi sendiri ikut kadar rasmi KWSP, PERKESO & SIP semasa. Untuk amaun tepat ikut jadual, isi amaun tetap dalam profil setiap pekerja (bahagian Caruman). Semua angka masih boleh disunting semasa proses gaji.', 'Enter the current official EPF, SOCSO & EIS rates yourself. For exact table amounts, enter fixed amounts in each staff profile (Contributions section). All figures remain editable during payroll.')}</p>
+    <p class="small muted">${L('Isi kadar rasmi KWSP, PERKESO & SIP semasa. Caruman semua pekerja dikira automatik daripada gaji asas + elaun yang dikenakan caruman. Angka masih boleh disunting semasa proses gaji jika perlu.', 'Enter the current official EPF, SOCSO & EIS rates. Contributions for all staff are calculated automatically from basic pay + contributable allowances. Figures remain editable during payroll if needed.')}</p>
     <div class="table-wrap" style="margin-top:.6rem"><table>
       <thead><tr><th></th><th>${L('Pekerja (%)', 'Employee (%)')}</th><th>${L('Majikan (%)', 'Employer (%)')}</th></tr></thead>
       <tbody>
@@ -2168,6 +2089,8 @@ function drawPaySettings() {
       </tbody></table></div>
     <div class="set-row"><span>${L('OT dikira untuk KWSP', 'OT counts for EPF')}</span><label class="switch"><input type="checkbox" id="pOtEpf" ${P.otInEpf ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><span>${L('OT dikira untuk PERKESO / SIP', 'OT counts for SOCSO / EIS')}</span><label class="switch"><input type="checkbox" id="pOtSo" ${P.otInSocso ? 'checked' : ''}><span></span></label></div>
+    <div class="set-row"><div><span>${L('Elaun lain (tiada dalam senarai elaun) dikira untuk KWSP', 'Other allowances (not in the list) count for EPF')}</span></div><label class="switch"><input type="checkbox" id="pOaEpf" ${P.otherAllowEpf ? 'checked' : ''}><span></span></label></div>
+    <div class="set-row"><div><span>${L('Elaun lain dikira untuk PERKESO / SIP', 'Other allowances count for SOCSO / EIS')}</span></div><label class="switch"><input type="checkbox" id="pOaSo" ${P.otherAllowSocso ? 'checked' : ''}><span></span></label></div>
   </div>
   <div class="card">
     <h3>${L('Kiraan Gaji', 'Pay Calculation')}</h3>
@@ -2184,7 +2107,97 @@ function drawPaySettings() {
     </div>
     <div class="field"><label class="lbl">${L('Bonus kehadiran penuh sebulan (RM, 0 = tiada)', 'Monthly perfect attendance bonus (RM, 0 = none)')}</label>${num('pBonus', P.perfectBonus)}</div>
     <button class="btn btn-primary" id="pSave">${L('Simpan Tetapan Gaji', 'Save Payroll Settings')}</button>
-  </div>`;
+  </div>
+  <div class="card">
+    <h3>${L('Templat Elaun Syarikat', 'Company Allowance Templates')}</h3>
+    <p class="small muted">${L('Senarai elaun syarikat & sama ada ia dikenakan KWSP / PERKESO. Admin hanya pilih nama elaun & amaun dalam profil pekerja — caruman dikira automatik ikut tetapan di sini.', 'Company allowances and whether EPF / SOCSO applies. Admins only pick the allowance name & amount in the staff profile — contributions are calculated automatically from these settings.')}</p>
+    <div id="tplBox">${(c.allowanceTemplates || []).map(a => allowRow(a, true)).join('')}</div>
+    <div class="row"><button class="btn btn-sm btn-plus" id="tplAdd">${icon('plus', 16)} ${L('Tambah Templat Elaun', 'Add Allowance Template')}</button>
+      <button class="btn btn-primary btn-sm" id="tplSave">${L('Simpan Templat', 'Save Templates')}</button></div>
+  </div>
+
+  <div class="card">
+    <h3>${L('Kadar OT', 'Overtime Rates')}</h3>
+    <p class="small muted">${L('Gandaan kadar sejam. Isi ikut polisi syarikat anda.', 'Multiplier of the hourly rate. Set according to your company policy.')}</p>
+    <div class="grid3">
+      <div class="field"><label class="lbl">${L('Hari biasa', 'Normal day')}</label><input class="input" type="number" step="0.1" min="0" id="otN" value="${otRates(c).normal}"></div>
+      <div class="field"><label class="lbl">${L('Hari rehat', 'Rest day')}</label><input class="input" type="number" step="0.1" min="0" id="otR" value="${otRates(c).rest}"></div>
+      <div class="field"><label class="lbl">${L('Cuti umum', 'Public holiday')}</label><input class="input" type="number" step="0.1" min="0" id="otH" value="${otRates(c).holiday}"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" id="otSave">${L('Simpan', 'Save')}</button>
+  </div>
+
+  <div class="card">
+    <h3>${L('Borang Tuntutan — Kadar & Projek', 'Claim Form — Rates & Projects')}</h3>
+    <p class="small muted">${L('Kadar ini digunakan dalam borang tuntutan bulanan pekerja (Justification, Allowance & Claim Form).', 'These rates are used in the staff monthly claim form (Justification, Allowance & Claim Form).')}</p>
+    <div class="grid3">
+      <div class="field"><label class="lbl">Mileage (RM/km)</label><input class="input" type="number" step="0.01" min="0" id="crKm" value="${claimRates(c).km}"></div>
+      <div class="field"><label class="lbl">Outstation (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOut" value="${claimRates(c).outstation}"></div>
+      <div class="field"><label class="lbl">Overnight (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOver" value="${claimRates(c).overnight}"></div>
+      <div class="field"><label class="lbl">Mileage allowance offset (RM)</label><input class="input" type="number" step="0.01" min="0" id="crOff" value="${claimRates(c).offset}"></div>
+      <div class="field"><label class="lbl">SST (%)</label><input class="input" type="number" step="0.1" min="0" id="crSst" value="${claimRates(c).sst}"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" id="crSave">${L('Simpan Kadar', 'Save Rates')}</button>
+    <div class="sec-title">${L('Senarai Projek (Purpose of Journey / Remark)', 'Project List (Purpose of Journey / Remark)')}</div>
+    <div class="chips" id="prjChips" style="margin-bottom:.7rem"></div>
+    <div class="row"><input class="input grow" id="prjIn" style="max-width:340px" placeholder="${L('Nama projek', 'Project name')}">
+      <button class="btn btn-plus" id="prjAdd">${icon('plus', 16)} ${L('Tambah', 'Add')}</button></div>
+  </div>
+
+  <div class="card">
+    <h3>${L('PCB / Cukai Bulanan Pekerja', 'Monthly PCB / Tax per Staff')}</h3>
+    <p class="small muted">${L('Isi amaun PCB bulanan setiap pekerja (ikut kalkulator LHDN). Kosong = tiada PCB. Dipotong automatik setiap kali gaji diproses.', 'Enter each staff member\'s monthly PCB (from the LHDN calculator). Blank = no PCB. Deducted automatically every payroll run.')}</p>
+    <div class="table-wrap"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th>${L('Gaji asas', 'Basic pay')}</th><th>PCB (RM)</th></tr></thead><tbody>
+      ${S.workers.filter(w => w.active !== false).map(w => `<tr><td><b>${esc(w.name)}</b><div class="xs muted mono">${esc(w.id)}</div></td><td>${w.payType === 'monthly' || !w.payType ? money(w.salary || 0) : esc(w.payType)}</td>
+        <td><input class="input" type="number" step="0.01" min="0" data-pcb="${esc(w.id)}" value="${(c.pcbMap || {})[w.id] ?? ''}" style="max-width:130px"></td></tr>`).join('')}</tbody></table></div>
+    <button class="btn btn-primary btn-sm" id="pcbSave">${L('Simpan PCB', 'Save PCB')}</button>
+  </div>
+`;
+  $('#pcbSave').onclick = async (e) => {
+    const map = {}; $$('[data-pcb]').forEach(i => { if (Number(i.value) > 0) map[i.dataset.pcb] = Number(i.value); });
+    busy(e.currentTarget, true);
+    try { await updateDoc(cRef(), { pcbMap: map }); S.company.pcbMap = map; logAct('finance.pcb'); toast(L('PCB disimpan.', 'PCB saved.')); }
+    catch (err) { toast(authErr(err), 'bad'); } finally { busy(e.currentTarget, false); }
+  };
+  const tplBox = $('#tplBox'); bindDyn(tplBox);
+  $('#tplAdd').onclick = () => tplBox.insertAdjacentHTML('beforeend', allowRow({}, true));
+  $('#tplSave').onclick = async (e) => {
+    busy(e.currentTarget, true);
+    try { await updateDoc(cRef(), { allowanceTemplates: readRows(tplBox, 'allow') }); toast(L('Templat disimpan.', 'Templates saved.')); }
+    catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  $('#otSave').onclick = async (e) => {
+    busy(e.currentTarget, true);
+    try {
+      await updateDoc(cRef(), { otRates: { normal: Number($('#otN').value || 0), rest: Number($('#otR').value || 0), holiday: Number($('#otH').value || 0) } });
+      toast(L('Kadar OT disimpan.', 'OT rates saved.'));
+    } catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  // Kadar tuntutan & projek
+  $('#crSave').onclick = async (e) => {
+    const v = (id) => Number($('#' + id).value || 0);
+    busy(e.currentTarget, true);
+    try {
+      await updateDoc(cRef(), { claimRates: { km: v('crKm'), outstation: v('crOut'), overnight: v('crOver'), offset: v('crOff'), sst: v('crSst') } });
+      logAct('settings.claimRates'); toast(L('Kadar disimpan.', 'Rates saved.'));
+    } catch (err) { toast(authErr(err), 'bad'); }
+    finally { busy(e.currentTarget, false); }
+  };
+  const drawPrj = () => {
+    const d = S.company.projects || [];
+    $('#prjChips').innerHTML = d.length ? d.map((x, i) => `<span class="chip">${esc(x)}<button data-pdx="${i}">✕</button></span>`).join('') : `<span class="small muted">${L('Tiada projek.', 'No projects.')}</span>`;
+    $$('[data-pdx]').forEach(b => b.onclick = async () => { const arr = [...(S.company.projects || [])]; arr.splice(Number(b.dataset.pdx), 1); await updateDoc(cRef(), { projects: arr }); S.company.projects = arr; drawPrj(); });
+  };
+  drawPrj();
+  $('#prjAdd').onclick = async () => {
+    const v = $('#prjIn').value.trim(); if (!v) return;
+    const arr = [...new Set([...(S.company.projects || []), v])];
+    await updateDoc(cRef(), { projects: arr }); S.company.projects = arr; $('#prjIn').value = ''; drawPrj();
+  };
+
+
   $('#pSave').onclick = async (e) => {
     const v = (id) => Number($('#' + id).value || 0);
     busy(e.currentTarget, true);
@@ -2193,6 +2206,7 @@ function drawPaySettings() {
         payroll: {
           epfEe: v('pEpfEe'), epfEr: v('pEpfEr'), socsoEe: v('pSoEe'), socsoEr: v('pSoEr'), eisEe: v('pEiEe'), eisEr: v('pEiEr'),
           otInEpf: $('#pOtEpf').checked, otInSocso: $('#pOtSo').checked,
+          otherAllowEpf: $('#pOaEpf').checked, otherAllowSocso: $('#pOaSo').checked,
           workDaysPerMonth: v('pWd') || 26, hoursPerDay: v('pHd') || 8,
           deductUnpaid: $('#pUnpaid').checked, deductAbsent: $('#pAbsent').checked,
           lateMode: $('#pLate').value, lateAmount: v('pLateAmt'), perfectBonus: v('pBonus')

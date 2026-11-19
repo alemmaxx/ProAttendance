@@ -9,9 +9,14 @@ export const PAYROLL_DEFAULTS = {
   workDaysPerMonth: 26, hoursPerDay: 8,
   epfEe: 0, epfEr: 0, socsoEe: 0, socsoEr: 0, eisEe: 0, eisEr: 0,
   deductUnpaid: true, deductAbsent: false, lateMode: 'none', lateAmount: 0,
-  otInEpf: false, otInSocso: false, perfectBonus: 0
+  otInEpf: false, otInSocso: false, perfectBonus: 0, otherAllowEpf: true, otherAllowSocso: true
 };
-export const payrollSettings = (c) => ({ ...PAYROLL_DEFAULTS, ...(c?.payroll || {}) });
+// Tetapan kewangan: kadar caruman, PCB setiap pekerja (pcbMap) & senarai elaun (KWSP/PERKESO)
+export const payrollSettings = (c) => ({ ...PAYROLL_DEFAULTS, ...(c?.payroll || {}), pcbMap: c?.pcbMap || {}, allowTpl: c?.allowanceTemplates || [] });
+const allowFlags = (P, name) => {
+  const t = P.allowTpl.find(x => String(x.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase());
+  return t ? { epf: !!t.epf, socso: !!t.socso } : { epf: !!P.otherAllowEpf, socso: !!P.otherAllowSocso };
+};
 
 export function periodRange(period) {
   const [y, m] = period.split('-').map(Number);
@@ -87,7 +92,7 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
     if (!amt) return;
     earnings.push({
       name: a.name, note: a.type === 'daily' ? `${presentN} × ${money(a.amount)}` : '',
-      amount: r2(amt), kind: 'allow', epf: !!a.epf, socso: !!a.socso, once: a.type === 'once'
+      amount: r2(amt), kind: 'allow', ...allowFlags(P, a.name), once: a.type === 'once'
     });
   });
 
@@ -157,14 +162,15 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
 
 // Kira caruman berkanun (ganti baris sedia ada)
 export function applyStatutory(item, P, w = {}) {
-  const st = w.statutory || {};
+  // Caruman ikut kadar dalam Tetapan Kewangan; PCB ikut senarai PCB finance
+  const st = {}, pcb = Number(P.pcbMap?.[w.id] || 0);
   const red = item.deductions.filter(d => d.kind === 'unpaid' || d.kind === 'late').reduce((a, d) => a + Number(d.amount || 0), 0);
   const epfBase = Math.max(0, item.earnings.filter(e => e.epf).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const socsoBase = Math.max(0, item.earnings.filter(e => e.socso).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const pick = (ov, base, pct) => (ov !== undefined && ov !== null && ov !== '') ? r2(ov) : r2(base * Number(pct || 0) / 100);
   const ee = {
     epf: pick(st.epfEe, epfBase, P.epfEe), socso: pick(st.socsoEe, socsoBase, P.socsoEe),
-    eis: pick(st.eisEe, socsoBase, P.eisEe), pcb: (st.pcb !== undefined && st.pcb !== '') ? r2(st.pcb) : 0
+    eis: pick(st.eisEe, socsoBase, P.eisEe), pcb: r2(pcb)
   };
   item.employer = {
     epf: pick(st.epfEr, epfBase, P.epfEr), socso: pick(st.socsoEr, socsoBase, P.socsoEr), eis: pick(st.eisEr, socsoBase, P.eisEr)
