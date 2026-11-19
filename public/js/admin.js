@@ -11,7 +11,7 @@ import {
   onSnapshot, serverTimestamp, writeBatch, runTransaction, increment, Timestamp, deleteField
 } from './fs.js';
 import {
-  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
+  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, installBtn, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
   minsToHM, dayName, addDays, summarizeDay, TYPE_LABEL, METHOD_LABEL, getPosition, mapLink, applyBrand, logoHtml,
   isExpired, daysLeft, randPin, randSecret, money, copyText, authErr, icon, fileToDataURL
 } from './ui.js';
@@ -322,6 +322,7 @@ function renderShell() {
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
         <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
+        ${installBtn('btn btn-sm btn-soft btn-block')}
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 16)} ${L('Keluar', 'Logout')}</button></div>
       </div>
     </aside>

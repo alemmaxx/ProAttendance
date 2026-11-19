@@ -8,7 +8,7 @@ import {
   doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
 } from './fs.js';
 import {
-  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
+  $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, installBtn, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
   summarizeDay, TYPE_LABEL, METHOD_LABEL, haversine, getPosition, getDeviceId, takeSelfie, scanQR, verifyQr,
   applyBrand, logoHtml, isExpired, authErr, icon, fileToDataURL, punchTime
 } from './ui.js';
@@ -62,6 +62,7 @@ function renderLogin() {
       <p class="muted small center" style="margin-top:.9rem" data-ms="Lupa PIN? Sila hubungi majikan anda untuk reset." data-en="Forgot PIN? Ask your employer to reset it."></p>
       <div class="divider"></div>
       <p class="center small"><a href="/admin.html" data-ms="Log masuk Majikan / Admin" data-en="Employer / Admin login"></a></p>
+      <div class="center" style="margin-top:.6rem">${installBtn('btn btn-soft btn-sm')}</div>
     </form>
   </div>`;
   applyLang();
@@ -1492,6 +1493,7 @@ function viewProfil() {
   <div class="card stack">
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
     <button class="btn btn-ghost btn-block hide" id="pushB">${icon('bell', 18)} ${L('Hidupkan notifikasi', 'Turn on notifications')}</button>
+    ${installBtn('btn btn-soft btn-block')}
     <button class="btn btn-ghost btn-block" id="chPin">${icon('shield', 18)} ${L('Tukar PIN', 'Change PIN')}</button>
     <button class="btn btn-ghost btn-block" id="langB">${L('Bahasa: Bahasa Melayu', 'Language: English')}</button>
     <button class="btn btn-danger btn-block" id="lo">${icon('out', 18)} ${L('Log Keluar', 'Log Out')}</button>

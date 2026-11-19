@@ -25,16 +25,6 @@
       "type": "image/svg+xml"
     }
   ],
-  "id": "/",
-  "description": "Kehadiran pekerja, cuti, OT & gaji",
-  "shortcuts": [
-    {
-      "name": "Punch",
-      "url": "/index.html"
-    },
-    {
-      "name": "Admin",
-      "url": "/admin.html"
-    }
-  ]
+  "id": "/index.html",
+  "description": "Kehadiran pekerja, cuti, OT & gaji"
 }

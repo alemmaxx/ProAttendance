@@ -8,7 +8,7 @@ import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit, serverTimestamp, Timestamp, writeBatch
 } from './fs.js';
 import {
-  $, $$, L, esc, toast, modal, confirmBox, busy, langBtn, keepInputs, fmtDate, fmtDateTime, toDate, isExpired, daysLeft,
+  $, $$, L, esc, toast, modal, confirmBox, busy, langBtn, keepInputs, installBtn, fmtDate, fmtDateTime, toDate, isExpired, daysLeft,
   money, authErr, icon, applyBrand, copyText, todayStr
 } from './ui.js';
 
@@ -87,7 +87,7 @@ function renderShell() {
     <aside class="side" id="side">
       <div class="side-brand"><span class="logo logo-ini">${icon('shield', 22)}</span><div><div class="nm">ProAttendance</div><div class="xs" style="opacity:.7">Super Admin</div></div></div>
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span>${t}</span></button>`).join('')}</nav>
-      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
+      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>${installBtn('btn btn-sm btn-soft btn-block')}
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${L('Keluar', 'Logout')}</button></div></div>
     </aside>
     <div class="side-bg" id="sideBg"></div>

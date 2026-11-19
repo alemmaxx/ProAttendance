@@ -468,3 +468,40 @@ document.addEventListener('click', e => {
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+
+// ---------------------------------------------------------------- INSTALL APP (PWA — tanpa APK)
+let _dip = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); _dip = e; });
+window.addEventListener('appinstalled', () => { _dip = null; $$('[data-install]').forEach(b => b.remove()); toast(L('App berjaya di-install.', 'App installed.')); });
+export const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+export function installBtn(cls = 'btn btn-ghost btn-sm') {
+  if (isStandalone()) return '';
+  return `<button type="button" class="${cls}" data-install>${icon('dl', 16)} ${L('Install App', 'Install App')}</button>`;
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-install]'); if (!b) return;
+  e.preventDefault();
+  if (_dip) {
+    _dip.prompt();
+    try { const r = await _dip.userChoice; if (r.outcome === 'accepted') { _dip = null; b.remove(); } } catch {}
+    return;
+  }
+  const ios = isIOS(), sf = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+  const steps = ios
+    ? (sf ? [L('Tekan butang <b>Kongsi</b> (petak dengan anak panah ke atas) di bawah skrin.', 'Tap the <b>Share</b> button (square with an up arrow) at the bottom.'),
+             L('Skrol dan pilih <b>Add to Home Screen</b> (Tambah ke Skrin Utama).', 'Scroll and choose <b>Add to Home Screen</b>.'),
+             L('Tekan <b>Add</b>. Ikon app akan muncul di skrin utama.', 'Tap <b>Add</b>. The app icon appears on your home screen.')]
+          : [L('Di iPhone/iPad, buka laman ini dalam <b>Safari</b> dahulu.', 'On iPhone/iPad, open this page in <b>Safari</b> first.'),
+             L('Kemudian tekan <b>Kongsi</b> → <b>Add to Home Screen</b>.', 'Then tap <b>Share</b> → <b>Add to Home Screen</b>.')])
+    : [L('Tekan menu <b>⋮</b> (penjuru kanan atas Chrome).', 'Tap the <b>⋮</b> menu (top-right in Chrome).'),
+       L('Pilih <b>Install app</b> atau <b>Add to Home screen</b>.', 'Choose <b>Install app</b> or <b>Add to Home screen</b>.'),
+       L('Di komputer: tekan ikon install (⊕) di hujung kanan bar alamat.', 'On a computer: click the install icon (⊕) at the right end of the address bar.')];
+  modal({
+    title: L('Install App', 'Install App'),
+    body: `<p class="small muted">${L('Tiada muat turun APK diperlukan — app dipasang terus dari laman ini, buka skrin penuh seperti app biasa.', 'No APK download needed — the app installs straight from this page and opens full-screen like a normal app.')}</p>
+      <ol class="small" style="padding-left:1.2rem;line-height:1.7">${steps.map(x => `<li>${x}</li>`).join('')}</ol>`,
+    actions: [{ label: 'OK', cls: 'btn-primary' }]
+  });
+});
