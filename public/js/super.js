@@ -152,13 +152,13 @@ async function viewCompanies() {
   </div>`;
   const draw = () => {
     const q = $('#q').value.toLowerCase(), f = $('#fs').value;
-    const list = S.companies.filter(c => (!q || [c.name, c.code, c.ownerEmail, c.phone].join(' ').toLowerCase().includes(q))
+    const list = S.companies.filter(c => (!q || [c.name, c.code, c.ownerEmail, c.email, c.phone].join(' ').toLowerCase().includes(q))
       && (!f || (f === 'expired' ? isExpired(c) && c.status !== 'suspended' : f === 'suspended' ? c.status === 'suspended' : c.status === f && !isExpired(c))));
     $('#cl').innerHTML = list.length ? `<div class="table-wrap"><table>
       <thead><tr><th>${L('Syarikat', 'Company')}</th><th>${L('Pemilik', 'Owner')}</th><th>${L('Pekerja', 'Staff')}</th><th>${L('Status', 'Status')}</th><th>${L('Tamat', 'Expiry')}</th><th></th></tr></thead>
       <tbody>${list.map(c => `<tr>
         <td><b>${esc(c.name)}</b><div class="xs muted mono">${esc(c.code)} · ${fmtDate(c.createdAt)}</div></td>
-        <td class="small">${esc(c.ownerEmail || '')}<div class="xs muted">${esc(c.phone || '')}</div></td>
+        <td class="small">${esc(c.ownerEmail || '')}<div class="xs muted">${esc([c.email && c.email !== c.ownerEmail ? c.email : '', c.phone].filter(Boolean).join(' · '))}</div></td>
         <td>${c.workerCount || 0}</td>
         <td>${statusBadge(c)}</td>
         <td class="small">${fmtDate(c.expiry)}<div class="xs muted">${daysLeft(c)} ${L('hari', 'days')}</div></td>

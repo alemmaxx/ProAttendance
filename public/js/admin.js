@@ -193,8 +193,8 @@ function renderOnboarding(extra = false) {
       <div class="field"><label class="lbl">${L('Kod syarikat (2–6 huruf)', 'Company code (2–6 letters)')} *</label>
         <input class="input id-input" id="cc" required maxlength="6" pattern="[A-Za-z]{2,6}">
         <p class="xs muted" id="ccMsg">${L('Kod ini menjadi awalan ID pekerja, cth: KOD001. Tidak boleh ditukar.', 'This becomes the staff ID prefix, e.g. CODE001. Cannot be changed.')}</p></div>
-      <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')} *</label>
-        <input class="input" id="cp" required inputmode="tel" maxlength="20"></div>
+      <div class="field"><label class="lbl">${L('E-mel syarikat', 'Company email')} *</label>
+        <input class="input" id="cp" type="email" required maxlength="120" value="${esc(S.user.email || '')}"></div>
       <button class="btn btn-primary btn-block" id="ob" type="submit">${L('Mula Sekarang', 'Get Started')}</button>
       <p class="center small" style="margin-top:1rem">${extra ? `<button type="button" class="link-btn" id="back">← ${L('Kembali', 'Back')}</button> · ` : ''}${S.isSuper ? `<a href="/superadmin.html">Super Admin</a> · ` : ''}<button type="button" class="link-btn" id="lo">${L('Log keluar', 'Log out')}</button></p>
     </form>
@@ -227,7 +227,7 @@ function renderOnboarding(extra = false) {
       let ref = '';
       try { ref = (localStorage.getItem('pa_ref') || '').toUpperCase().slice(0, 20); } catch {}
       b.set(newRef, {
-        name, code, phone: $('#cp').value.trim(), ownerUid: S.user.uid, ownerEmail: S.user.email || '', ref,
+        name, code, email: $('#cp').value.trim(), phone: '', ownerUid: S.user.uid, ownerEmail: S.user.email || '', ref,
         logo: '', address: '', ssm: '', color: '#d9b44a',
         status: 'trial', plan: 'trial', expiry, createdAt: serverTimestamp(), seq: 0, workerCount: 0,
         settings: { workStart: '09:00', workEnd: '18:00', grace: 10, workDays: [1, 2, 3, 4, 5], selfie: true, oneDevice: false },
@@ -1166,7 +1166,8 @@ function viewSettings() {
     <div class="grid2">
       <div class="field"><label class="lbl">${L('Nama syarikat', 'Company name')}</label><input class="input" id="sName" value="${esc(c.name)}"></div>
       <div class="field"><label class="lbl">${L('No. pendaftaran (SSM)', 'Registration no. (SSM)')}</label><input class="input" id="sSsm" value="${esc(c.ssm || '')}"></div>
-      <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')}</label><input class="input" id="sPhone" value="${esc(c.phone || '')}"></div>
+      <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')}</label><input class="input" id="sPhone" inputmode="tel" value="${esc(c.phone || '')}"></div>
+      <div class="field"><label class="lbl">${L('E-mel syarikat', 'Company email')}</label><input class="input" id="sEmail" type="email" value="${esc(c.email || c.ownerEmail || '')}"></div>
       <div class="field"><label class="lbl">${L('Warna tema', 'Theme colour')}</label><input class="input" type="color" id="sColor" value="${esc(c.color && c.color.toLowerCase() !== '#1d4ed8' ? c.color : '#d9b44a')}" style="height:46px;padding:.2rem"></div>
     </div>
     <div class="field"><label class="lbl">${L('Alamat', 'Address')}</label><textarea class="input" id="sAddr" style="min-height:70px">${esc(c.address || '')}</textarea></div>
@@ -1320,7 +1321,7 @@ function viewSettings() {
     busy(e.currentTarget, true);
     try {
       const b = writeBatch(db);
-      b.update(cRef(), { name, logo, color, ssm: $('#sSsm').value.trim(), phone: $('#sPhone').value.trim(), address: $('#sAddr').value.trim() });
+      b.update(cRef(), { name, logo, color, ssm: $('#sSsm').value.trim(), phone: $('#sPhone').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim() });
       b.update(doc(db, 'companyCodes', c.code), { name, logo, color });
       await b.commit();
       logAct('settings.profile', name);
