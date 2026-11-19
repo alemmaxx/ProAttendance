@@ -1603,13 +1603,14 @@ async function drawWeek() {
         <button class="btn btn-sm btn-ghost" id="wkToday">${L('Minggu ini', 'This week')}</button>
       </div>
       <div class="row">
+        <button class="btn btn-sm btn-primary" id="wkAuto">${icon('cal', 16)} ${L('Jadual Auto', 'Auto Roster')}</button>
         <button class="btn btn-sm btn-soft" id="wkCopy">${L('Salin minggu lepas', 'Copy last week')}</button>
         <button class="btn btn-sm btn-ghost" id="wkClear">${L('Kosongkan', 'Clear')}</button>
       </div>
     </div>
     ${!tpls.length ? `<p class="small" style="color:var(--warn)">${L('Belum ada templat syif. Tambah di tab "Templat Syif" dahulu — atau guna waktu kerja biasa.', 'No shift templates yet. Add them in "Shift Templates" first — or use normal hours.')}</p>` : ''}
     <div id="wkGrid"><div class="loader" style="min-height:120px"><span class="spin"></span></div></div>
-    <p class="xs muted" style="margin-top:.6rem">${L('"Ikut biasa" = syif biasa pekerja / waktu kerja syarikat. Perubahan disimpan serta-merta.', '"Default" = staff default shift / company hours. Changes save instantly.')}</p>
+    <p class="xs muted" style="margin-top:.6rem">${L('↺ = ikut biasa (syif biasa & hari kerja dalam profil pekerja). Pekerja yang syifnya tetap TIDAK perlu diubah di sini — tetapkan sekali sahaja di Pekerja → Edit → Syif biasa & Hari kerja. Guna <b>Jadual Auto</b> untuk syif bergilir. Tekan nama pekerja atau tajuk hari untuk ubah sekali gus.', '↺ = default (usual shift & work days in the staff profile). Staff with fixed shifts need NO changes here — set them once in Staff → Edit → Usual shift & Work days. Use <b>Auto Roster</b> for rotating shifts. Tap a staff name or day header to change in bulk.')}</p>
   </div>`;
   $('#wkPrev').onclick = () => { S.weekFrom = addDays(from, -7); drawWeek(); };
   $('#wkNext').onclick = () => { S.weekFrom = addDays(from, 7); drawWeek(); };
@@ -1631,15 +1632,15 @@ async function drawWeek() {
   $('#wkGrid').innerHTML = `<div class="table-wrap"><table>
     <thead><tr><th>${L('Pekerja', 'Staff')}</th>${days.map(d => {
       const dt = new Date(d + 'T00:00:00');
-      return `<th class="center">${dayName(dt.getDay())}<div style="font-weight:600;text-transform:none">${dt.getDate()}/${dt.getMonth() + 1}</div>${hol[d] ? `<div class="badge b-info" style="text-transform:none">${esc(hol[d])}</div>` : ''}</th>`;
+      return `<th class="center" data-dcol="${d}" style="cursor:pointer" title="${L('Ubah semua pekerja hari ini', 'Change all staff this day')}">${dayName(dt.getDay())}<div style="font-weight:600;text-transform:none">${dt.getDate()}/${dt.getMonth() + 1}</div>${hol[d] ? `<div class="badge b-info" style="text-transform:none">${esc(hol[d])}</div>` : ''}</th>`;
     }).join('')}</tr></thead>
-    <tbody>${workers.map(w => `<tr><td style="white-space:nowrap"><b>${esc(w.name)}</b><div class="xs muted mono">${esc(w.id)}</div></td>
+    <tbody>${workers.map(w => `<tr><td style="white-space:nowrap;cursor:pointer" data-wrow="${esc(w.id)}" title="${L('Ubah sekali gus', 'Change in bulk')}"><b>${esc(w.name)}</b><div class="xs muted mono">${esc(w.id)}</div></td>
       ${days.map(d => {
         const val = roster[d]?.[w.id] || '';
         const leave = lv[w.id]?.[d];
         return `<td style="min-width:118px">
           <select class="input" data-cell="${esc(w.id)}|${d}" style="padding:.35rem .4rem;font-size:.8rem;${val === 'off' ? 'background:var(--card2);color:var(--muted)' : val ? 'background:var(--brand-soft);color:var(--gold)' : ''}">
-            <option value="">${L('Ikut biasa', 'Default')} (${esc(defLabel(w, d))})</option>
+            <option value="">↺ ${esc(defLabel(w, d))}</option>
             ${tpls.map(t => `<option value="${esc(t.id)}" ${val === t.id ? 'selected' : ''}>${esc(t.name)} ${esc(t.start)}</option>`).join('')}
             <option value="off" ${val === 'off' ? 'selected' : ''}>${L('Rehat', 'Rest')}</option>
           </select>
@@ -1653,6 +1654,21 @@ async function drawWeek() {
     sel.style.background = v === 'off' ? 'var(--card2)' : v ? 'var(--brand-soft)' : ''; sel.style.color = v === 'off' ? 'var(--muted)' : v ? 'var(--gold)' : '';
     try { await setDoc(doc(db, 'companies', S.cid, 'roster', d), { a: { [w]: v || deleteField() } }, { merge: true }); }
     catch (e) { toast(authErr(e), 'bad'); }
+  });
+  $('#wkAuto').onclick = () => autoRoster(from, workers.map(w => w.id));
+  $$('[data-wrow]').forEach(td => td.onclick = () => autoRoster(from, [td.dataset.wrow], 1));
+  $$('[data-dcol]').forEach(th => th.onclick = () => {
+    const d = th.dataset.dcol;
+    modal({
+      title: `${L('Semua pekerja', 'All staff')} · ${fmtDate(d)}`,
+      body: `<div class="field"><label class="lbl">${L('Tetapkan kepada', 'Set to')}</label><select class="input" id="dv">
+        <option value="">↺ ${L('Ikut biasa', 'Default')}</option>${tpls.map(t => `<option value="${esc(t.id)}">${esc(t.name)} ${esc(t.start)}–${esc(t.end)}</option>`).join('')}<option value="off">${L('Rehat', 'Rest')}</option></select></div>`,
+      actions: [{ label: L('Batal', 'Cancel') }, { label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
+        const v = $('#dv', el).value, a = {};
+        workers.forEach(w => { a[w.id] = v || deleteField(); });
+        try { await setDoc(doc(db, 'companies', S.cid, 'roster', d), { a }, { merge: true }); drawWeek(); } catch (e) { toast(authErr(e), 'bad'); return false; }
+      } }]
+    });
   });
   $('#wkCopy').onclick = async (e) => {
     if (!await confirmBox(L('Salin jadual minggu lepas ke minggu ini? Jadual sedia ada akan ditulis ganti.', "Copy last week's roster to this week? Existing entries will be overwritten."))) return;
@@ -2925,4 +2941,115 @@ function openClaimAdmin(cl, after) {
       }
     }]
   });
+}
+
+
+// ---------------------------------------------------------------- JADUAL AUTO (syif bergilir)
+function autoRoster(from, preIds, preWeeks = 4) {
+  const tpls = S.company.shiftTemplates || [];
+  const workers = S.workers.filter(w => w.active !== false);
+  const depts = [...new Set(workers.map(w => w.dept).filter(Boolean))];
+  const st = S.company.settings || {};
+  const DOW = [1, 2, 3, 4, 5, 6, 0];
+  const m = modal({
+    title: L('Jadual Auto', 'Auto Roster'), wide: true,
+    body: `
+      <p class="small muted">${L('Pilih pekerja, susunan syif dan hari rehat. Sistem isi jadual untuk beberapa minggu sekali gus.', 'Pick staff, shift order and rest days. The system fills the roster for several weeks at once.')}</p>
+      <div class="sec-title">1. ${L('Pekerja', 'Staff')}</div>
+      <div class="row" style="margin-bottom:.4rem"><button type="button" class="btn btn-sm btn-ghost" id="arAll">${L('Pilih semua', 'Select all')}</button><button type="button" class="btn btn-sm btn-ghost" id="arNone">${L('Kosongkan', 'None')}</button>
+        ${depts.map(d => `<button type="button" class="btn btn-sm btn-soft" data-ardept="${esc(d)}">${esc(d)}</button>`).join('')}</div>
+      <div class="chips" style="max-height:170px;overflow:auto">${workers.map(w => `<label class="check" style="min-width:210px"><input type="checkbox" data-arw="${esc(w.id)}" ${preIds.includes(w.id) ? 'checked' : ''}>${esc(w.name)} <span class="xs muted mono">${esc(w.id)}</span></label>`).join('')}</div>
+
+      <div class="sec-title">2. ${L('Susunan syif', 'Shift order')}</div>
+      <p class="xs muted">${L('Satu syif = syif tetap. Dua atau lebih = bergilir mengikut minggu (cth: Pagi → Petang → Malam).', 'One shift = fixed. Two or more = rotate weekly (e.g. Morning → Evening → Night).')}</p>
+      <div id="arSeq" class="stack"></div>
+      <button type="button" class="btn btn-sm btn-plus" id="arAdd">${icon('plus', 16)} ${L('Tambah syif dalam giliran', 'Add shift to rotation')}</button>
+      <label class="check" style="margin-top:.5rem"><input type="checkbox" id="arStag" checked>${L('Agihkan sama rata (pekerja bermula pada syif berbeza supaya setiap syif ada orang)', 'Spread evenly (staff start on different shifts so every shift is covered)')}</label>
+
+      <div class="sec-title">3. ${L('Hari rehat', 'Rest days')}</div>
+      <select class="input" id="arRestMode" style="max-width:360px">
+        <option value="own">${L('Ikut hari kerja setiap pekerja', "Follow each staff's work days")}</option>
+        <option value="fixed">${L('Tetapkan hari rehat yang sama untuk semua', 'Same rest days for everyone')}</option>
+        <option value="rot">${L('Hari rehat bergilir (berbeza untuk setiap pekerja)', 'Rotating rest day (different for each staff)')}</option>
+      </select>
+      <div class="row hide" id="arRestDays" style="margin-top:.4rem">${DOW.map(d => `<label class="check"><input type="checkbox" data-arr="${d}" ${!(st.workDays || [1, 2, 3, 4, 5]).includes(d) ? 'checked' : ''}>${dayName(d)}</label>`).join('')}</div>
+      <div class="hide" id="arRotBox" style="margin-top:.4rem"><label class="lbl">${L('Bilangan hari rehat seminggu', 'Rest days per week')}</label><input class="input" type="number" min="0" max="3" id="arRotN" value="1" style="max-width:100px"></div>
+
+      <div class="sec-title">4. ${L('Tempoh', 'Period')}</div>
+      <div class="grid2">
+        <div class="field"><label class="lbl">${L('Mula minggu', 'Starting week')}</label><input class="input" type="date" id="arFrom" value="${from}"></div>
+        <div class="field"><label class="lbl">${L('Berapa minggu', 'How many weeks')}</label><input class="input" type="number" min="1" max="12" id="arWeeks" value="${preWeeks}"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="arHol" checked>${L('Cuti umum ikut biasa (tidak diisi)', 'Leave public holidays as default (not filled)')}</label>
+      <div class="card" style="margin-top:.6rem;background:var(--gold2);border-color:var(--gold)" id="arPrev"></div>`,
+    actions: [{ label: L('Batal', 'Cancel') }, { label: L('Jana Jadual', 'Generate Roster'), cls: 'btn-primary', autoClose: false, onClick: () => { run(); return false; } }]
+  });
+  const el = m.el;
+  const seqRow = (id = '') => `<div class="row" data-seq><select class="input grow" style="max-width:320px">${tpls.map(t => `<option value="${esc(t.id)}" ${t.id === id ? 'selected' : ''}>${esc(t.name)} ${esc(t.start)}–${esc(t.end)}</option>`).join('')}
+    <option value="__normal" ${id === '__normal' ? 'selected' : ''}>${L('Waktu biasa syarikat', 'Company normal hours')} ${esc(st.workStart || '09:00')}–${esc(st.workEnd || '18:00')}</option></select><button type="button" class="icon-btn" data-sdel>✕</button></div>`;
+  const seqBox = $('#arSeq', el);
+  seqBox.innerHTML = seqRow(tpls[0]?.id || '__normal');
+  $('#arAdd', el).onclick = () => { seqBox.insertAdjacentHTML('beforeend', seqRow(tpls[$$('[data-seq]', seqBox).length]?.id || '')); prev(); };
+  seqBox.onclick = (e) => { if (e.target.closest('[data-sdel]') && $$('[data-seq]', seqBox).length > 1) { e.target.closest('[data-seq]').remove(); prev(); } };
+  const ids = () => $$('[data-arw]', el).filter(x => x.checked).map(x => x.dataset.arw);
+  $('#arAll', el).onclick = () => { $$('[data-arw]', el).forEach(x => x.checked = true); prev(); };
+  $('#arNone', el).onclick = () => { $$('[data-arw]', el).forEach(x => x.checked = false); prev(); };
+  $$('[data-ardept]', el).forEach(b => b.onclick = () => { $$('[data-arw]', el).forEach(x => { x.checked = S.workers.find(w => w.id === x.dataset.arw)?.dept === b.dataset.ardept; }); prev(); });
+  $('#arRestMode', el).onchange = (e) => { $('#arRestDays', el).classList.toggle('hide', e.target.value !== 'fixed'); $('#arRotBox', el).classList.toggle('hide', e.target.value !== 'rot'); prev(); };
+  el.addEventListener('change', () => prev());
+
+  // Bina pelan: { date: { wid: value } }
+  const build = () => {
+    const seq = $$('[data-seq] select', seqBox).map(x => x.value);
+    const sel = ids(), weeks = Math.min(12, Math.max(1, Number($('#arWeeks', el).value || 1)));
+    const start = weekStart($('#arFrom', el).value || from);
+    const mode = $('#arRestMode', el).value, stag = $('#arStag', el).checked, skipHol = $('#arHol', el).checked;
+    const fixedRest = $$('[data-arr]', el).filter(x => x.checked).map(x => Number(x.dataset.arr));
+    const rotN = Math.min(3, Math.max(0, Number($('#arRotN', el).value || 0)));
+    const hol = holidayMap(S.company), plan = {};
+    sel.forEach((wid, i) => {
+      const w = S.workers.find(x => x.id === wid);
+      const own = Array.isArray(w?.workDays) && w.workDays.length ? w.workDays : (st.workDays || [1, 2, 3, 4, 5]);
+      for (let k = 0; k < weeks; k++) {
+        const sh = seq[(k + (stag ? i : 0)) % seq.length];
+        const rotRest = Array.from({ length: rotN }, (_, j) => DOW[(i * rotN + j) % 7]); // hari rehat tetap, berbeza setiap pekerja
+        for (let dI = 0; dI < 7; dI++) {
+          const d = addDays(start, k * 7 + dI), dow = new Date(d + 'T00:00:00').getDay();
+          const rest = mode === 'own' ? !own.includes(dow) : mode === 'fixed' ? fixedRest.includes(dow) : rotRest.includes(dow);
+          let v;
+          if (skipHol && hol[d]) v = '';
+          else if (rest) v = 'off';
+          else v = sh === '__normal' ? '' : sh;
+          (plan[d] = plan[d] || {})[wid] = v;
+        }
+      }
+    });
+    return { plan, start, weeks, sel, seq };
+  };
+  const prev = () => {
+    const { plan, start, weeks, sel, seq } = build();
+    const name = (v) => v === 'off' ? L('Rehat', 'Rest') : v === '' ? '↺' : (tpls.find(t => t.id === v)?.name || v);
+    const wk1 = dateRange(start, addDays(start, 6));
+    $('#arPrev', el).innerHTML = sel.length ? `<b>${L('Pratonton minggu pertama', 'First week preview')}</b> · ${sel.length} ${L('pekerja', 'staff')} · ${weeks} ${L('minggu', 'weeks')}${seq.length > 1 ? ' · ' + L('bergilir', 'rotating') : ''}
+      <div class="table-wrap" style="margin-top:.4rem"><table><thead><tr><th></th>${wk1.map(d => `<th class="center">${dayName(new Date(d + 'T00:00:00').getDay())}</th>`).join('')}</tr></thead>
+      <tbody>${sel.slice(0, 6).map(wid => `<tr><td class="small">${esc(S.workers.find(w => w.id === wid)?.name || wid)}</td>${wk1.map(d => `<td class="center small">${esc(name(plan[d]?.[wid] ?? ''))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      ${sel.length > 6 ? `<div class="xs muted">+${sel.length - 6} ${L('lagi', 'more')}</div>` : ''}` : `<span class="small">${L('Pilih sekurang-kurangnya seorang pekerja.', 'Select at least one staff member.')}</span>`;
+  };
+  prev();
+  const run = async () => {
+    const { plan, sel, weeks } = build();
+    if (!sel.length) return toast(L('Pilih pekerja dahulu.', 'Select staff first.'), 'warn');
+    if (!await confirmBox(L(`Isi jadual ${weeks} minggu untuk ${sel.length} pekerja? Jadual sedia ada pekerja ini akan ditulis ganti.`, `Fill ${weeks} weeks for ${sel.length} staff? Their existing roster entries will be overwritten.`))) return;
+    try {
+      const b = writeBatch(db);
+      Object.entries(plan).forEach(([d, a]) => {
+        const upd = {}; Object.entries(a).forEach(([wid, v]) => { upd[wid] = v || deleteField(); });
+        b.set(doc(db, 'companies', S.cid, 'roster', d), { a: upd }, { merge: true });
+      });
+      await b.commit();
+      logAct('roster.auto', `${sel.length} staff × ${weeks} weeks`);
+      toast(L('Jadual dijana.', 'Roster generated.'));
+      m.close(); drawWeek();
+    } catch (e) { toast(authErr(e), 'bad'); }
+  };
 }
