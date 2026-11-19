@@ -28,6 +28,8 @@ export function keepInputs(fn) {
   fn();
   Object.entries(vals).forEach(([id, v]) => { const el = document.getElementById(id); if (!el) return; if (el.type === 'checkbox') el.checked = v; else if (v !== '') { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } });
 }
+// Ralat simpanan yang lewat (selepas butang sudah selesai)
+window.addEventListener('pa-save-error', e => toast(e.detail, 'bad', 6000));
 export const langBtn = () => `<button type="button" class="lang-btn" data-lang-toggle>${getLang() === 'en' ? 'BM' : 'EN'}</button>`;
 
 // ---------- Teks selamat ----------

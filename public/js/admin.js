@@ -9,7 +9,7 @@ import {
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where, orderBy, limit,
   onSnapshot, serverTimestamp, writeBatch, runTransaction, increment, Timestamp, deleteField
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+} from './fs.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
   minsToHM, dayName, addDays, summarizeDay, TYPE_LABEL, METHOD_LABEL, getPosition, mapLink, applyBrand, logoHtml,
@@ -246,7 +246,7 @@ function renderOnboarding(extra = false) {
         b.set(doc(db, 'users', S.user.uid), { role: 'admin', cid: newRef.id, cids: [newRef.id], email: S.user.email || '', createdAt: serverTimestamp() });
         S.me = { role: 'admin', cid: newRef.id, cids: [newRef.id] };
       }
-      await b.commit();
+      await b.commitFull();
       S.cid = newRef.id;
       stopAll();
       toast(L('Syarikat berjaya didaftarkan!', 'Company registered!'));
@@ -786,7 +786,7 @@ async function saveWorker(el, w) {
     b.set(doc(db, 'users', uid), { role: 'worker', cid: S.cid, workerId: wid, createdAt: serverTimestamp() });
     b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...data, uid, active: true, mustChangePin: true, deviceId: null, createdAt: serverTimestamp() });
     b.update(cRef(), { workerCount: increment(1) });
-    await b.commit();
+    await b.commitFull();
     logAct('worker.create', `${wid} ${data.name}`);
     showLogin(wid, pin, data.name, data.phone, true);
   } catch (e) {

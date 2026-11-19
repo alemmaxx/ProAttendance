@@ -1,6 +1,6 @@
 // ProAttendance — Syif, jadual, cuti umum & cuti (Fasa 2)
 import { L, todayStr, addDays, summarizeDay } from './ui.js';
-import { collection, query, where, getDocs, documentId, doc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { collection, query, where, getDocs, documentId, doc, setDoc, serverTimestamp } from './fs.js';
 
 // ---------- Jenis cuti ----------
 export const DEFAULT_LEAVE_TYPES = () => [

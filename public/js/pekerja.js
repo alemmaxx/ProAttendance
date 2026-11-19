@@ -6,7 +6,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+} from './fs.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
   summarizeDay, TYPE_LABEL, METHOD_LABEL, haversine, getPosition, getDeviceId, takeSelfie, scanQR, verifyQr,

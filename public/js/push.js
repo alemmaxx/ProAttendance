@@ -2,7 +2,7 @@
 import { app, db } from './fb.js';
 import { VAPID_KEY } from './config.js';
 import { getMessaging, getToken, isSupported, onMessage } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
-import { doc, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { doc, setDoc, serverTimestamp } from './fs.js';
 import { toast } from './ui.js';
 
 export async function pushAvailable() {

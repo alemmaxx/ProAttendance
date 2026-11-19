@@ -5,7 +5,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getFirestore, doc, getDoc, getDocs, collection, query, where, writeBatch, serverTimestamp
-} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+} from './fs.js';
 import { submitAutoOT, loadRoster } from './sched.js';
 import {
   $, $$, L, esc, toast, modal, langBtn, applyLang, todayStr, addDays, fmtTime, toDate, summarizeDay, TYPE_LABEL,
