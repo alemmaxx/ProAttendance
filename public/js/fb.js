@@ -6,7 +6,10 @@ import {
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 import { FIREBASE_CONFIG, DB_ID, REGION, WORKER_EMAIL_DOMAIN } from "./config.js";
 
-export const app = initializeApp(FIREBASE_CONFIG);
+// Halaman pekerja guna sesi log masuk berasingan, supaya log masuk pekerja & admin
+// dalam pelayar yang sama tidak saling log keluar.
+const WORKER_PAGE = /^\/(index\.html)?$/i.test(location.pathname);
+export const app = initializeApp(FIREBASE_CONFIG, WORKER_PAGE ? 'pa-worker' : '[DEFAULT]');
 export const auth = getAuth(app);
 
 // Cache tempatan (luar talian) HANYA untuk halaman pekerja & kiosk — punch tetap disimpan semasa tiada internet.
