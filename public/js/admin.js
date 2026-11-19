@@ -24,7 +24,7 @@ import {
   computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2
 } from './payroll.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
-import { computeClaim, claimRates, CLAIM_RATE_DEFAULTS, claimDocHtml, claimExcel, statusBadge as claimBadge, claimTimeline } from './claims.js';
+import { computeClaim, claimRates, CLAIM_RATE_DEFAULTS, claimDocHtml, claimExcel, claimSummaryExcel, statusBadge as claimBadge, claimTimeline } from './claims.js';
 
 const app = $('#app');
 const S = {
@@ -299,7 +299,6 @@ const NAV = () => [
   ['roster', 'cal', L('Syif & Jadual', 'Shifts & Roster')],
   ['approvals', 'check', L('Kelulusan (Cuti/OT)', 'Approvals (Leave/OT)')],
   ['claims', 'doc', L('Tuntutan', 'Claims')],
-  ['tasks', 'doc', L('Tugasan', 'Tasks')],
   ['payroll', 'money', L('Gaji', 'Payroll')],
   ['hr', 'shield', L('Fail HR', 'HR Files')],
   ['locations', 'pin', L('Lokasi', 'Locations')],
@@ -720,7 +719,7 @@ function workerForm(w) {
       <div class="row">
         <button type="button" class="btn btn-sm btn-plus" id="addAllow">${icon('plus', 16)} ${L('Tambah Elaun', 'Add Allowance')}</button>
         ${tpls.length ? `<select class="input" id="tplSel" style="width:auto;padding:.38rem .6rem;font-size:.85rem">
-          <option value="">${L('+ Dari templat…', '+ From template…')}</option>${tpls.map((t, i) => `<option value="${i}">${esc(t.name)} (${money(t.amount)})</option>`).join('')}</select>` : ''}
+          <option value="">${L('+ Dari templat…', '+ From template…')}</option>${tpls.map((t, i) => `<option value="${i}">${esc(t.name)}${t.amount ? ` (${money(t.amount)})` : ""}</option>`).join('')}</select>` : ''}
       </div>
       <div class="sec-title">${L('Potongan', 'Deductions')}</div>
       <div id="dedBox">${(w.deductions || []).map(dedRow).join('')}</div>
@@ -1201,7 +1200,7 @@ function viewSettings() {
       <label class="switch"><input type="checkbox" id="tSelfie" ${st.selfie !== false ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><div><b>${L('Satu telefon seorang pekerja', 'One phone per staff')}</b><div class="small muted">${L('Akaun dikunci pada telefon pertama yang log masuk.', 'Account locks to the first phone that logs in.')}</div></div>
       <label class="switch"><input type="checkbox" id="tDev" ${st.oneDevice ? 'checked' : ''}><span></span></label></div>
-    <div class="set-row"><div><b>${L('Butang Lawatan Tapak', 'Site Visit button')}</b><div class="small muted">${L('Pekerja lapangan boleh rekod lawatan ke tapak/pelanggan (GPS + gambar).', 'Field staff can record visits to sites/clients (GPS + photo).')}</div></div>
+    <div class="set-row"><div><b>${L('Butang Update Kerja (luar pejabat)', 'Work Update button (outside office)')}</b><div class="small muted">${L('Muncul hanya bila pekerja berada di luar kawasan pejabat. Lokasi GPS, kerja & gambar dikemas kini ke Jadual & Catatan.', 'Appears only when staff are outside the office area. GPS location, work & photo update Schedule & Notes.')}</div></div>
       <label class="switch"><input type="checkbox" id="tVisit" ${st.visits ? 'checked' : ''}><span></span></label></div>
     <button class="btn btn-primary" id="saveWork" style="margin-top:.8rem">${L('Simpan Tetapan', 'Save Settings')}</button>
   </div>
@@ -1485,6 +1484,8 @@ function drawShiftTpl() {
   <div class="card">
     <h3>${L('Templat Syif', 'Shift Templates')}</h3>
     <p class="small muted">${L('Contoh: Pagi 07:00–15:00, Petang 15:00–23:00, Malam 23:00–07:00. Lajur: nama · masuk · keluar · rehat mula · rehat tamat · tenggang lewat (minit). Rehat kosong = ikut rehat syarikat.', 'E.g. Morning 07:00–15:00, Evening 15:00–23:00, Night 23:00–07:00. Columns: name · start · end · break from · break until · late grace (min).')}</p>
+    <div class="dyn-row shd" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr .8fr auto;background:none;border:0;padding-bottom:0">
+      ${[L('Nama syif', 'Shift name'), L('Mula kerja', 'Start Work'), L('Tamat kerja', 'End Work'), L('Mula rehat', 'Start Break'), L('Tamat rehat', 'End Break'), L('Lewat (minit)', 'Late (min)')].map(t => `<span class="xs muted bold">${t}</span>`).join('')}<span style="width:36px"></span></div>
     <div id="shBox">${(S.company.shiftTemplates || []).map(shiftRow).join('')}</div>
     <div class="row">
       <button class="btn btn-sm btn-plus" id="shAdd">${icon('plus', 16)} ${L('Tambah Syif', 'Add Shift')}</button>
@@ -2109,13 +2110,13 @@ function drawPaySettings() {
     <button class="btn btn-primary" id="pSave">${L('Simpan Tetapan Gaji', 'Save Payroll Settings')}</button>
   </div>
   <div class="card">
-    <h3>${L('Templat Elaun Syarikat', 'Company Allowance Templates')}</h3>
-    <p class="small muted">${L('Senarai elaun syarikat & sama ada ia dikenakan KWSP / PERKESO. Admin hanya pilih nama elaun & amaun dalam profil pekerja — caruman dikira automatik ikut tetapan di sini.', 'Company allowances and whether EPF / SOCSO applies. Admins only pick the allowance name & amount in the staff profile — contributions are calculated automatically from these settings.')}</p>
-    <div id="tplBox">${(c.allowanceTemplates || []).map(a => allowRow(a, true)).join('')}</div>
-    <div class="row"><button class="btn btn-sm btn-plus" id="tplAdd">${icon('plus', 16)} ${L('Tambah Templat Elaun', 'Add Allowance Template')}</button>
-      <button class="btn btn-primary btn-sm" id="tplSave">${L('Simpan Templat', 'Save Templates')}</button></div>
+    <h3>${L('Elaun & Caruman', 'Allowances & Contributions')}</h3>
+    <p class="small muted">${L('Senarai ini diambil terus daripada elaun dalam profil pekerja. Finance hanya tandakan sama ada setiap elaun dikenakan KWSP / PERKESO — gaji dikira automatik.', 'This list comes straight from the allowances in staff profiles. Finance just ticks whether each allowance is subject to EPF / SOCSO — payroll calculates automatically.')}</p>
+    <div id="alBox"></div>
+    <div class="row" style="margin-top:.6rem"><input class="input grow" id="alNew" style="max-width:280px" placeholder="${L('Tambah nama elaun lain', 'Add another allowance name')}">
+      <button class="btn btn-sm btn-plus" id="alAdd">${icon('plus', 16)} ${L('Tambah', 'Add')}</button>
+      <button class="btn btn-primary btn-sm" id="tplSave">${L('Simpan', 'Save')}</button></div>
   </div>
-
   <div class="card">
     <h3>${L('Kadar OT', 'Overtime Rates')}</h3>
     <p class="small muted">${L('Gandaan kadar sejam. Isi ikut polisi syarikat anda.', 'Multiplier of the hourly rate. Set according to your company policy.')}</p>
@@ -2159,12 +2160,38 @@ function drawPaySettings() {
     try { await updateDoc(cRef(), { pcbMap: map }); S.company.pcbMap = map; logAct('finance.pcb'); toast(L('PCB disimpan.', 'PCB saved.')); }
     catch (err) { toast(authErr(err), 'bad'); } finally { busy(e.currentTarget, false); }
   };
-  const tplBox = $('#tplBox'); bindDyn(tplBox);
-  $('#tplAdd').onclick = () => tplBox.insertAdjacentHTML('beforeend', allowRow({}, true));
+  // Senarai elaun = templat syarikat + semua elaun dalam profil pekerja
+  const key = (n) => String(n || '').trim().toLowerCase();
+  const alMap = new Map();
+  (c.allowanceTemplates || []).forEach(t => { if (t.name) alMap.set(key(t.name), { ...t, name: t.name.trim(), users: 0, total: 0 }); });
+  S.workers.filter(w => w.active !== false).forEach(w => (w.allowances || []).forEach(a => {
+    if (!a.name) return;
+    const k = key(a.name);
+    if (!alMap.has(k)) alMap.set(k, { name: a.name.trim(), amount: 0, type: a.type || 'monthly', epf: !!P.otherAllowEpf, socso: !!P.otherAllowSocso, users: 0, total: 0, isNew: true });
+    const o = alMap.get(k); o.users++; o.total += a.type === 'daily' ? Number(a.amount || 0) * (P.workDaysPerMonth || 26) : Number(a.amount || 0);
+  }));
+  const drawAl = () => {
+    const rows = [...alMap.values()].sort((x, y) => y.users - x.users || x.name.localeCompare(y.name));
+    $('#alBox').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Elaun', 'Allowance')}</th><th>${L('Digunakan oleh', 'Used by')}</th><th class="center">${L('KWSP', 'EPF')}</th><th class="center">${L('PERKESO / SIP', 'SOCSO / EIS')}</th><th></th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td><b>${esc(r.name)}</b>${r.isNew ? ` <span class="badge b-warn">${L('baru — sila semak', 'new — please check')}</span>` : ''}</td>
+        <td class="small">${r.users ? `${r.users} ${L('pekerja', 'staff')} · ~${money(r.total)}/${L('bln', 'mo')}` : '<span class="muted">-</span>'}</td>
+        <td class="center"><input type="checkbox" data-alk="${esc(key(r.name))}" data-f="epf" ${r.epf ? 'checked' : ''}></td>
+        <td class="center"><input type="checkbox" data-alk="${esc(key(r.name))}" data-f="socso" ${r.socso ? 'checked' : ''}></td>
+        <td class="right">${r.users ? '' : `<button class="icon-btn" data-aldel="${esc(key(r.name))}">✕</button>`}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty small">${L('Belum ada elaun dalam profil pekerja.', 'No allowances in staff profiles yet.')}</div>`;
+    $$('[data-alk]').forEach(cb => cb.onchange = () => { const o = alMap.get(cb.dataset.alk); if (o) o[cb.dataset.f] = cb.checked; });
+    $$('[data-aldel]').forEach(b => b.onclick = () => { alMap.delete(b.dataset.aldel); drawAl(); });
+  };
+  drawAl();
+  $('#alAdd').onclick = () => { const n = $('#alNew').value.trim(); if (!n || alMap.has(key(n))) return; alMap.set(key(n), { name: n, amount: 0, type: 'monthly', epf: true, socso: true, users: 0, total: 0 }); $('#alNew').value = ''; drawAl(); };
   $('#tplSave').onclick = async (e) => {
+    const list = [...alMap.values()].map(({ name, amount, type, epf, socso }) => ({ name, amount: Number(amount || 0), type: type || 'monthly', epf: !!epf, socso: !!socso }));
     busy(e.currentTarget, true);
-    try { await updateDoc(cRef(), { allowanceTemplates: readRows(tplBox, 'allow') }); toast(L('Templat disimpan.', 'Templates saved.')); }
-    catch (err) { toast(authErr(err), 'bad'); }
+    try {
+      await updateDoc(cRef(), { allowanceTemplates: list }); S.company.allowanceTemplates = list;
+      alMap.forEach(o => { delete o.isNew; }); drawAl();
+      logAct('finance.allowances'); toast(L('Disimpan. Gaji akan dikira ikut tetapan ini.', 'Saved. Payroll will follow these settings.'));
+    } catch (err) { toast(authErr(err), 'bad'); }
     finally { busy(e.currentTarget, false); }
   };
   $('#otSave').onclick = async (e) => {
@@ -2843,12 +2870,10 @@ async function viewClaims() {
     $$('[data-cl]').forEach(b => b.onclick = () => openClaimAdmin(list.find(x => x.id === b.dataset.cl), () => viewClaims()));
   };
   $('#clF').onchange = draw;
-  $('#clX').onclick = () => {
-    if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
-    const aoa = [[S.company.name], [`Claims ${S.clMonth}`], [], ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/Overnight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total Expenses', 'Total (Allowance)', 'Claim Reimbursement', 'Checked by', 'Approved by', 'Paid ref']];
-    list.forEach(x => { const X = computeClaim(x, S.company); aoa.push([x.workerId, x.name, x.status, X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others, X.totalExpenses, X.allowanceTotal, X.reimbursement, x.checkedBy || '', x.approvedBy || '', x.paidRef || '']); });
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), S.clMonth);
-    XLSX.writeFile(wb, `Claims_${S.company.code}_${S.clMonth}.xlsx`);
+  $('#clX').onclick = (e) => {
+    if (!list.length) return toast(L('Tiada tuntutan untuk bulan ini.', 'No claims for this month.'), 'warn');
+    busy(e.currentTarget, true);
+    claimSummaryExcel(S.company, list, S.clMonth).catch(() => toast(L('Gagal muat modul Excel. Semak internet.', 'Could not load the Excel module. Check your connection.'), 'warn')).finally(() => busy(e.currentTarget, false));
   };
   draw();
 }
@@ -2905,7 +2930,7 @@ function openClaimAdmin(cl, after) {
     ]
   });
   $('#cDoc', m.el).onclick = async () => { const f = await claimFiles(cl); openPrint(claimDocHtml(S.company, cl, f), false) || toast(L('Benarkan pop-up.', 'Allow pop-ups.'), 'warn'); };
-  $('#cXl', m.el).onclick = () => claimExcel(S.company, cl) || toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
+  $('#cXl', m.el).onclick = (e) => { busy(e.currentTarget, true); claimExcel(S.company, cl).catch(() => toast(L('Gagal muat modul Excel. Semak internet.', 'Could not load the Excel module. Check your connection.'), 'warn')).finally(() => busy(e.currentTarget, false)); };
   const decideClaim = (ok) => ok === 'check' ? modal({
     title: L('Semak tuntutan', 'Check claim'),
     body: `<p class="small">${esc(cl.name)} · ${esc(cl.month)} · <b>${money(X.reimbursement)}</b></p>

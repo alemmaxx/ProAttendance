@@ -299,7 +299,7 @@ function viewHome() {
     ${S.sessionDate !== todayStr() ? `<p class="small" style="color:var(--warn);margin-top:.4rem">${L('Syif semalam masih terbuka', "Yesterday's shift is still open")} (${fmtDate(S.sessionDate)})</p>` : ''}
     <button class="punch-btn ${cls}" id="mainBtn">${icon(ico, 34)}<span>${TYPE_LABEL[main]()}</span></button>
     ${alt.map(a => `<button class="btn btn-ghost" data-alt="${a}">${TYPE_LABEL[a]()}</button>`).join('')}
-    ${S.company.settings?.visits ? `<button class="btn btn-ghost" id="visitBtn">${icon('pin', 16)} ${L('Lawatan Tapak', 'Site Visit')}${S.visits?.length ? ` (${S.visits.length})` : ''}</button>` : ''}
+    ${S.company.settings?.visits ? `<button class="btn btn-ghost hide" id="visitBtn">${icon('pin', 16)} ${L('Update Kerja', 'Work Update')}${S.visits?.length ? ` (${S.visits.length})` : ''}</button>` : ''}
     <p class="small muted" style="margin-top:.8rem">
       ${icon('pin', 15)} ${loc ? esc(loc.name) + ' · ' + METHOD_LABEL[loc.mode || 'button']() : (S.locations.length ? L('Pilih lokasi semasa punch', 'Choose location when punching') : L('Tiada lokasi ditetapkan', 'No location set'))}
     </p>
@@ -328,9 +328,8 @@ function viewHome() {
   };
   tick(); S.clockT = setInterval(tick, 1000);
   $('#mainBtn').onclick = (e) => punch(main, e.currentTarget);
-  $('#visitBtn') && ($('#visitBtn').onclick = visitForm);
+  if ($('#visitBtn')) { $('#visitBtn').onclick = visitForm; checkOutsideOffice(); }
   $$('[data-plan]').forEach(r => r.onclick = () => planNote(r.dataset.plan));
-  loadTasks();
   drawWeekStrip();
   $('#lvCard') && ($('#lvCard').onclick = () => go('mohon'));
   $$('[data-alt]').forEach(b => b.onclick = (e) => punch(b.dataset.alt, e.currentTarget));
@@ -342,6 +341,16 @@ function leaveChipsHtml() {
   if (!bal.length) return '';
   return `<div class="card" id="lvCard" style="cursor:pointer"><div class="card-head" style="margin-bottom:.5rem"><h3>${L('Baki cuti', 'Leave balance')} ${new Date().getFullYear()}</h3><span class="xs muted">${L('Mohon cuti', 'Apply')} ›</span></div>
     <div class="row">${bal.map(b => `<span class="badge ${b.left <= 0 ? 'b-bad' : 'b-ok'}" style="font-size:13px;padding:5px 11px">${esc(b.name)}: <b>${b.left}</b> / ${b.ent + b.carry}</span>`).join('')}</div></div>`;
+}
+
+// Masa masuk/keluar & status dalam kotak kalendar
+function calTimes(sm) {
+  if (!sm?.firstIn) return '';
+  return `<span class="cal-t">${fmtTime(sm.firstIn)}<br>${sm.lastOut && !sm.open ? fmtTime(sm.lastOut) : '…'}</span>`;
+}
+function calStatus(cls, sm, d, t) {
+  return ({ 'cal-ok': L('Hadir', 'Present'), 'cal-late': L('Lewat', 'Late'), 'cal-leave': L('Cuti', 'Leave'), 'cal-hol': L('Cuti U.', 'Holiday'),
+    'cal-off': L('Rehat', 'Off'), 'cal-abs': L('Tak hadir', 'Absent') })[cls] || (d === t ? L('Hari ini', 'Today') : '');
 }
 
 // Jalur kalendar minggu (skrin utama)
@@ -366,8 +375,9 @@ async function drawWeekStrip() {
         else if (inf.type === 'off') cls = 'cal-off';
         else if (d < t && byDate) cls = 'cal-abs';
         const mark = S.plans?.[d] || recs.some(r => r.type === 'visit');
-        return `<button class="cal-d ${cls} ${d === t ? 'cal-today' : ''}" data-wd="${d}" style="aspect-ratio:auto;padding:6px 0;line-height:1.1">
-          <span style="font-size:10px;font-weight:600;opacity:.8">${dayName(dt.getDay())}</span><br>${dt.getDate()}${mark ? '<i></i>' : ''}</button>`;
+        return `<button class="cal-d ${cls} ${d === t ? 'cal-today' : ''}" data-wd="${d}" style="aspect-ratio:auto;padding:6px 0;line-height:1.1;align-content:start">
+          <span style="font-size:10px;font-weight:600;opacity:.8">${dayName(dt.getDay())}</span><br>${dt.getDate()}${mark ? '<i></i>' : ''}
+          ${calTimes(sm)}<span class="cal-s">${calStatus(cls, sm, d, t)}</span></button>`;
       }).join('')}</div>
       <p class="xs muted center" style="margin:.5rem 0 0">${L('Tekan tarikh untuk butiran, catatan & tuntutan', 'Tap a date for details, notes & claims')}</p>`;
     $('#wkP').onclick = () => { S.wk = addDays(S.wk, -7); drawWeekStrip(); };
@@ -508,14 +518,27 @@ async function savePunch(rec, selfie) {
   return ref.id;
 }
 
-// ---------------------------------------------------------------- LAWATAN TAPAK
+// ---------------------------------------------------------------- UPDATE KERJA (di luar kawasan pejabat)
+// Butang hanya muncul bila pekerja berada di luar kawasan pejabat (geofence lokasi syarikat).
+async function checkOutsideOffice() {
+  const b = $('#visitBtn'); if (!b) return;
+  const locs = (S.locations || []).filter(l => l.lat != null && l.lng != null);
+  if (!locs.length) { b.classList.remove('hide'); return; }
+  let pos = null; try { pos = await getPosition(10000); } catch {}
+  if (!pos) { b.classList.remove('hide'); return; }          // tiada GPS: benarkan update
+  const inside = locs.some(l => haversine(pos.lat, pos.lng, l.lat, l.lng) <= Number(l.radius || 100) + Math.min(Number(pos.acc || 0), 100));
+  if (!$('#visitBtn')) return;
+  $('#visitBtn').classList.toggle('hide', inside);
+}
+
 function visitForm() {
   let photo = null;
   const m = modal({
-    title: L('Lawatan Tapak', 'Site Visit'),
-    body: `<p class="small muted">${L('Rekod lawatan ke tapak / pelanggan. Lokasi GPS direkod. Tidak menjejaskan jam kerja.', 'Record a visit to a site / client. GPS is recorded. Does not affect work hours.')}</p>
-      <div class="field"><label class="lbl">${L('Nama tapak / pelanggan', 'Site / client name')}</label><input class="input" id="vn" maxlength="100"></div>
-      <div class="field"><label class="lbl">${L('Catatan', 'Notes')}</label><textarea class="input" id="vt" maxlength="500" style="min-height:60px"></textarea></div>
+    title: L('Update Kerja', 'Work Update'),
+    body: `<p class="small muted">${L('Anda di luar kawasan pejabat. Rekod lokasi & kerja semasa — dikemas kini terus ke Jadual & Catatan hari ini. Tidak menjejaskan jam kerja.', 'You are outside the office area. Record your current location & work — updates today\'s Schedule & Notes directly. Does not affect work hours.')}</p>
+      <div class="field"><label class="lbl">${L('Lokasi / tapak / pelanggan', 'Location / site / client')}</label><input class="input" id="vn" maxlength="100" list="projList"></div>
+      <datalist id="projList">${(S.company.projects || []).map(p => `<option value="${esc(p)}">`).join('')}</datalist>
+      <div class="field"><label class="lbl">${L('Kerja yang dibuat', 'Work done')}</label><textarea class="input" id="vt" maxlength="500" style="min-height:60px"></textarea></div>
       <div class="field"><label class="lbl">${L('Gambar (pilihan)', 'Photo (optional)')}</label><input class="input" type="file" accept="image/*" capture="environment" id="vp"><div id="vpPrev"></div></div>`,
     actions: [
       { label: L('Batal', 'Cancel') },
@@ -530,7 +553,16 @@ function visitForm() {
             lat: pos?.lat ?? null, lng: pos?.lng ?? null, acc: pos?.acc ?? null, dist: null,
             selfie: null, hasSelfie: !!photo, deviceId: getDeviceId(), dept: S.worker.dept || ''
           };
-          try { await savePunch(rec, photo); toast(L('Lawatan direkod.', 'Visit recorded.')); await loadToday(); viewHome(); }
+          try {
+            await savePunch(rec, photo);
+            // Kemas kini Jadual & Catatan hari ini
+            const d = todayStr(), hm = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            const line = `${hm} ${name}${rec.note ? ' — ' + rec.note : ''}`;
+            const note = (S.plans?.[d] ? S.plans[d] + '\n' : '') + line;
+            await setDoc(doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${d}`), { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date: d, note: note.slice(0, 1500), at: serverTimestamp() });
+            S.plans = S.plans || {}; S.plans[d] = note;
+            toast(L('Update kerja direkod.', 'Work update recorded.')); await loadToday(); viewHome();
+          }
           catch (e) { toast(authErr(e), 'bad'); return false; }
         }
       }
@@ -701,7 +733,7 @@ async function viewRekod() {
       else if (hol[d] || inf.type === 'holiday') cls = 'cal-hol';
       else if (inf.type === 'off') cls = 'cal-off';
       else if (d < t) cls = 'cal-abs';
-      cells.push(`<button class="cal-d ${cls} ${d === t ? 'cal-today' : ''}" data-cd="${d}">${dd}${S.plans?.[d] ? '<i></i>' : ''}</button>`);
+      cells.push(`<button class="cal-d ${cls} ${d === t ? 'cal-today' : ''}" data-cd="${d}" style="aspect-ratio:auto;min-height:54px;align-content:start;padding:4px 0;line-height:1.1">${dd}${S.plans?.[d] ? '<i></i>' : ''}${calTimes(sm)}</button>`);
     }
     const calHtml = `<div class="cal">${['Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab', 'Ahd'].map((x, i) => `<div class="cal-h">${dayName((i + 1) % 7)}</div>`).join('')}${cells.join('')}</div>
       <div class="row xs muted" style="margin:.5rem 0 1rem;gap:.8rem">
@@ -1071,18 +1103,63 @@ function claimEditor(month, tab = 'j') {
   draw(tab);
 }
 
+// Tukar teks koordinat / pautan Google Maps kepada {lat, lng}
+function parseCoord(txt) {
+  const t = String(txt || '').trim(); if (!t) return null;
+  const pats = [/@(-?\d+\.\d+),\s*(-?\d+\.\d+)/, /[?&](?:q|query|ll|destination|origin)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/, /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, /^\s*(-?\d{1,2}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)\s*$/];
+  for (const re of pats) { const m = t.match(re); if (m) { const lat = Number(m[1]), lng = Number(m[2]); if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng }; } }
+  return null;
+}
+// Jarak jalan raya (km) antara titik — guna laluan jalan, jika gagal anggar dari garis lurus × 1.3
+async function routeKm(pts) {
+  try {
+    const q = pts.map(p => `${p.lng},${p.lat}`).join(';');
+    const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${q}?overview=false`, { signal: ctl.signal });
+    clearTimeout(tm);
+    const js = await r.json();
+    if (js.code === 'Ok' && js.routes?.[0]) return { km: Math.round(js.routes[0].distance / 100) / 10, est: false };
+  } catch {}
+  let m = 0; for (let i = 1; i < pts.length; i++) m += haversine(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng);
+  return { km: Math.round(m * 1.3 / 100) / 10, est: true };
+}
+
 function journeyForm(cl, j = {}, idx = null, after) {
   const R = claimRates(S.company), t = todayStr();
   const f = (k, label, step = '0.01') => `<div class="field"><label class="lbl">${label}</label><input class="input" type="number" step="${step}" min="0" data-jk="${k}" value="${j[k] ?? ''}" inputmode="decimal"></div>`;
+  // Tempat tersimpan: lokasi syarikat + titik yang pernah digunakan dalam tuntutan ini
+  const saved = [];
+  (S.locations || []).filter(l => l.lat != null).forEach(l => saved.push({ n: l.name, lat: l.lat, lng: l.lng }));
+  (cl.journeys || []).forEach(x => (x.points || []).forEach(p => { if (p.lat != null && !saved.some(s => s.n === p.n)) saved.push(p); }));
+  let pts = j.points?.length ? j.points.map(p => ({ ...p })) : [{ n: '', lat: null, lng: null }, { n: '', lat: null, lng: null }];
+  let kmAuto = j.km || 0, est = false, manual = !!(j.km && !j.points?.length);
+  const ptRow = (p, i) => `<div class="jpt" data-pi="${i}">
+      <span class="jpt-n">${i === 0 ? L('Dari', 'From') : i === pts.length - 1 ? L('Ke', 'To') : L('Hentian', 'Stop') + ' ' + i}</span>
+      <input class="input" data-pn value="${esc(p.n || '')}" placeholder="${L('Nama tempat', 'Place name')}" list="savedPl">
+      <input class="input mono" data-pc value="${p.lat != null ? `${p.lat}, ${p.lng}` : ''}" placeholder="${L('koordinat / pautan Google Maps', 'coordinates / Google Maps link')}">
+      <button type="button" class="icon-btn" data-pg title="${L('Lokasi semasa', 'Current location')}">${icon('gps', 18)}</button>
+      ${pts.length > 2 ? `<button type="button" class="icon-btn" data-px>✕</button>` : '<span></span>'}
+    </div>`;
   const m = modal({
     title: idx === null ? L('Tambah perjalanan', 'Add journey') : L('Ubah perjalanan', 'Edit journey'),
-    body: `${projOpts()}
+    body: `${projOpts()}<datalist id="savedPl">${saved.map(p => `<option value="${esc(p.n)}">`).join('')}</datalist>
       <div class="grid2">
         <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="jd" value="${esc(j.date || t)}" max="${t}"></div>
         <div class="field"><label class="lbl">Purpose of Journey (${L('projek', 'project')})</label><input class="input" id="jp" list="projList" value="${esc(j.project || '')}"></div>
       </div>
-      <div class="field"><label class="lbl">Journey From/To</label><input class="input" id="jr" maxlength="150" value="${esc(j.route || '')}" placeholder="${L('cth: Pejabat Puchong → Tapak Kundang → Pejabat', 'e.g. Puchong office → Kundang site → office')}"></div>
-      <div class="grid3">${f('km', `Mileage (km) × RM${R.km}`, '0.1')}${f('toll', 'Toll (RM)')}${f('parking', 'Parking (RM)')}</div>
+      <div class="sec-title" style="margin-top:.2rem">Journey From/To</div>
+      <p class="xs muted" style="margin-top:-.3rem">${L('Pilih tempat tersimpan, tekan 📍 untuk lokasi semasa, atau tampal koordinat / pautan Google Maps. Jarak & RM dikira automatik.', 'Pick a saved place, tap 📍 for current location, or paste coordinates / a Google Maps link. Distance & RM are calculated automatically.')}</p>
+      <div id="jPts"></div>
+      <div class="row"><button type="button" class="btn btn-sm btn-plus" id="jAddPt">${icon('plus', 16)} ${L('Tambah hentian', 'Add stop')}</button>
+        <label class="check"><input type="checkbox" id="jRt" ${j.roundTrip ? 'checked' : ''}>${L('Pergi-balik (kembali ke titik mula)', 'Round trip (back to start)')}</label></div>
+      <div class="card" style="margin-top:.6rem;padding:.8rem">
+        <div class="row between"><span>${L('Jarak', 'Distance')}</span><b id="jKm">-</b></div>
+        <div class="row between"><span>Mileage × RM${R.km}/km</span><b id="jMil">RM0.00</b></div>
+        <p class="xs muted" id="jKmNote" style="margin:.3rem 0 0"></p>
+        <label class="check xs" style="margin-top:.3rem"><input type="checkbox" id="jMan" ${manual ? 'checked' : ''}>${L('Isi km sendiri', 'Enter km manually')}</label>
+        <input class="input ${manual ? '' : 'hide'}" type="number" step="0.1" min="0" id="jKmIn" value="${manual ? j.km : ''}" placeholder="km" style="max-width:140px;margin-top:.3rem">
+      </div>
+      <div class="grid2">${f('toll', 'Toll (RM)')}${f('parking', 'Parking (RM)')}</div>
       <div class="grid2">${f('outstation', `Outstation × RM${R.outstation}`, '1')}${f('overnight', `Overnight × RM${R.overnight}`, '1')}</div>
       <div class="field"><label class="lbl">Remarks</label><input class="input" id="jm" maxlength="200" value="${esc(j.remarks || '')}"></div>
       <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>Total (RM)</b><b id="jt" style="color:var(--gold);font-size:1.2rem">0.00</b></div></div>`,
@@ -1091,7 +1168,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
       {
         label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
           const row = read(el);
-          if (!row.date || !row.route) { toast(L('Sila isi tarikh dan perjalanan.', 'Please fill in date and journey.'), 'warn'); return false; }
+          if (!row.date || !row.route) { toast(L('Sila isi tarikh dan tempat perjalanan.', 'Please fill in date and journey places.'), 'warn'); return false; }
           if (row.date.slice(0, 7) !== cl.month) { toast(L('Tarikh mesti dalam bulan tuntutan ini.', 'Date must be within this claim month.'), 'warn'); return false; }
           const J = [...(cl.journeys || [])];
           if (idx === null) J.push(row); else J[idx] = row;
@@ -1102,13 +1179,84 @@ function journeyForm(cl, j = {}, idx = null, after) {
       }
     ]
   });
-  const read = (el) => {
-    const o = { date: $('#jd', el).value, route: $('#jr', el).value.trim(), project: $('#jp', el).value.trim(), remarks: $('#jm', el).value.trim() };
+  const el = m.el, box = $('#jPts', el);
+  const drawPts = () => { box.innerHTML = pts.map(ptRow).join(''); };
+  const syncPts = () => {
+    $$('[data-pi]', box).forEach(r => {
+      const i = Number(r.dataset.pi), p = pts[i]; if (!p) return;
+      p.n = $('[data-pn]', r).value.trim();
+      const c = parseCoord($('[data-pc]', r).value);
+      p.lat = c ? c.lat : null; p.lng = c ? c.lng : null;
+    });
+  };
+  const kmNow = () => manual ? Number($('#jKmIn', el).value || 0) : kmAuto;
+  const read = () => {
+    syncPts();
+    const names = pts.map(p => p.n).filter(Boolean);
+    const route = names.length ? (names.join(' → ') + ($('#jRt', el).checked && names.length > 1 ? ' → ' + names[0] : '')) : (j.route || '');
+    const o = { date: $('#jd', el).value, route, project: $('#jp', el).value.trim(), remarks: $('#jm', el).value.trim(),
+      points: pts.map(p => ({ n: p.n, lat: p.lat, lng: p.lng })), roundTrip: $('#jRt', el).checked };
+    const km = kmNow(); if (km) o.km = km;
     $$('[data-jk]', el).forEach(i => { const v = Number(i.value || 0); if (v) o[i.dataset.jk] = v; });
     return o;
   };
-  const upd = () => { $('#jt', m.el).textContent = journeyTotal(read(m.el), R).toFixed(2); };
-  m.el.addEventListener('input', upd); upd();
+  const upd = () => {
+    const km = kmNow();
+    $('#jKm', el).textContent = km ? `${km} km${est && !manual ? ' (' + L('anggaran', 'estimate') + ')' : ''}` : '-';
+    $('#jMil', el).textContent = 'RM' + (km * R.km).toFixed(2);
+    $('#jt', el).textContent = journeyTotal(read(), R).toFixed(2);
+  };
+  let calcT = null, seq = 0;
+  const calc = () => {
+    clearTimeout(calcT);
+    calcT = setTimeout(async () => {
+      syncPts();
+      if (manual) return upd();
+      let path = pts.filter(p => p.lat != null);
+      if (path.length < 2 || path.length !== pts.length) {
+        $('#jKmNote', el).textContent = L('Isi lokasi (koordinat) untuk semua titik supaya jarak dikira.', 'Add a location (coordinates) for every point to calculate distance.');
+        kmAuto = 0; return upd();
+      }
+      if ($('#jRt', el).checked) path = [...path, path[0]];
+      const my = ++seq;
+      $('#jKmNote', el).textContent = L('Mengira jarak…', 'Calculating distance…');
+      const r = await routeKm(path);
+      if (my !== seq) return;
+      kmAuto = r.km; est = r.est;
+      $('#jKmNote', el).textContent = r.est ? L('Anggaran (laluan jalan tidak dapat dicapai): jarak garis lurus × 1.3.', 'Estimate (road route unavailable): straight-line distance × 1.3.') : L('Jarak ikut laluan jalan raya.', 'Distance by road route.');
+      upd();
+    }, 500);
+  };
+  drawPts();
+  box.addEventListener('change', (e) => {
+    const r = e.target.closest('[data-pi]'); if (!r) return;
+    if (e.target.matches('[data-pn]')) {           // pilih tempat tersimpan → isi koordinat
+      const sp = saved.find(x => x.n === e.target.value.trim());
+      if (sp && !parseCoord($('[data-pc]', r).value)) $('[data-pc]', r).value = `${sp.lat}, ${sp.lng}`;
+    }
+    calc();
+  });
+  box.addEventListener('click', async (e) => {
+    const r = e.target.closest('[data-pi]'); if (!r) return;
+    const i = Number(r.dataset.pi);
+    if (e.target.closest('[data-px]')) { syncPts(); pts.splice(i, 1); drawPts(); calc(); return; }
+    if (e.target.closest('[data-pg]')) {
+      const b = e.target.closest('[data-pg]'); b.disabled = true;
+      try {
+        const p = await getPosition(12000);
+        $('[data-pc]', r).value = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
+        if (!$('[data-pn]', r).value.trim()) $('[data-pn]', r).value = L('Lokasi semasa', 'Current location');
+        calc();
+      } catch { toast(L('Tidak dapat lokasi GPS.', 'Could not get GPS location.'), 'warn'); }
+      b.disabled = false;
+    }
+  });
+  $('#jAddPt', el).onclick = () => { syncPts(); pts.splice(pts.length - 1, 0, { n: '', lat: null, lng: null }); drawPts(); };
+  $('#jRt', el).onchange = calc;
+  $('#jMan', el).onchange = (e) => { manual = e.target.checked; $('#jKmIn', el).classList.toggle('hide', !manual); calc(); upd(); };
+  el.addEventListener('input', (e) => { if (!e.target.closest('#jPts')) upd(); });
+  if (pts.every(p => p.lat != null) && !j.km) calc();
+  upd();
 }
 
 function purchaseForm(cl, p = {}, idx = null, after) {

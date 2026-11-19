@@ -188,54 +188,154 @@ export function claimDocHtml(c, claim, files = {}) {
   ${cf}${af}${sf}${jf}${att}</body></html>`;
 }
 
-// ---------- Eksport Excel (susunan sama) ----------
-export function claimExcel(c, claim) {
-  if (!window.XLSX) return false;
+// ---------- Eksport Excel bergaya (berkotak, ikut borang syarikat) ----------
+let _xl = null;
+export function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (_xl) return _xl;
+  _xl = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    sc.onload = () => res(window.ExcelJS); sc.onerror = () => { _xl = null; rej(new Error('excel')); };
+    document.head.appendChild(sc);
+  });
+  return _xl;
+}
+const THIN = { style: 'thin', color: { argb: 'FF555555' } };
+const BOX = { top: THIN, left: THIN, bottom: THIN, right: THIN };
+const HEAD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2EC' } };
+const TOT_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F3F3' } };
+const GOLD_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+const NUM = '#,##0.00;[Red]-#,##0.00;"-"';
+
+// Tajuk borang: nama syarikat, tajuk, pemohon & bulan
+function xlHead(ws, c, claim, title, cols) {
+  ws.mergeCells(1, 1, 1, cols); ws.getCell(1, 1).value = c.name || '';
+  ws.getCell(1, 1).font = { bold: true, size: 14 };
+  ws.mergeCells(2, 1, 2, cols); ws.getCell(2, 1).value = title;
+  ws.getCell(2, 1).font = { bold: true, size: 13 }; ws.getCell(2, 1).alignment = { horizontal: 'center' };
+  ws.getCell(4, 1).value = 'Claimant:'; ws.getCell(4, 2).value = `${claim.name || ''} (${claim.workerId || ''})`; ws.getCell(4, 2).font = { bold: true };
+  ws.getCell(5, 1).value = 'Month:'; ws.getCell(5, 2).value = monthTxt(claim.month); ws.getCell(5, 2).font = { bold: true };
+  return 7;
+}
+// Jadual berkotak: header + baris; pulangkan baris seterusnya
+function xlTable(ws, r0, headers, rows, opt = {}) {
+  const hr = ws.getRow(r0);
+  headers.forEach((h, i) => { const cell = hr.getCell(i + 1); cell.value = h; cell.font = { bold: true, size: 10 }; cell.fill = HEAD_FILL; cell.border = BOX; cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+  hr.height = opt.headH || 32;
+  rows.forEach((row, k) => {
+    const r = ws.getRow(r0 + 1 + k);
+    row.forEach((v, i) => {
+      const cell = r.getCell(i + 1); cell.value = v; cell.border = BOX;
+      if (typeof v === 'number') { cell.numFmt = (opt.intCols || []).includes(i) ? '0' : NUM; cell.alignment = { horizontal: 'right' }; }
+      else cell.alignment = { vertical: 'top', wrapText: true };
+      if (opt.totalRows?.includes(k)) { cell.font = { bold: true }; cell.fill = TOT_FILL; }
+    });
+  });
+  return r0 + 1 + rows.length;
+}
+// Blok ringkasan (label : nilai) di sebelah kanan
+function xlSummary(ws, r0, col, items) {
+  items.forEach(([label, v, strong], k) => {
+    const r = ws.getRow(r0 + k);
+    const a = r.getCell(col), b = r.getCell(col + 1);
+    a.value = label; b.value = v; b.numFmt = NUM;
+    [a, b].forEach(x => { x.border = BOX; if (strong) { x.font = { bold: true, size: strong === 2 ? 12 : 11 }; x.fill = strong === 2 ? GOLD_FILL : TOT_FILL; } });
+    b.alignment = { horizontal: 'right' };
+  });
+  return r0 + items.length;
+}
+function xlSign(ws, r, claim) {
+  ws.getCell(r, 1).value = 'Checked by:'; ws.getCell(r, 4).value = 'Approved by:';
+  ws.getCell(r + 2, 1).value = claim.checkedBy || '……………………………'; ws.getCell(r + 2, 4).value = claim.approvedBy || '……………………………';
+  ws.getCell(r + 3, 1).value = claim.checkedAt || ''; ws.getCell(r + 3, 4).value = claim.approvedAt || '';
+  [ws.getCell(r + 2, 1), ws.getCell(r + 2, 4)].forEach(x => { x.font = { bold: true }; x.border = { top: THIN }; });
+}
+function xlPrint(ws) { ws.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: .3, right: .3, top: .4, bottom: .4, header: .2, footer: .2 } }; }
+async function xlDownload(wb, name) {
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+export async function claimExcel(c, claim) {
+  const ExcelJS = await loadExcelJS();
   const X = computeClaim(claim, c), R = X.R, { from, to } = monthRange(claim.month);
   const range = `${dmy(from)} - ${dmy(to)}`;
-  const top = (title) => [['', '', title], ['Claimant:', claim.name], ['Month:', monthTxt(claim.month)], []];
-  const wb = XLSX.utils.book_new();
-  const cf = [...top('EXPENSES  PROJECT CLAIM  FORM'),
-    ['DATE RANGE', 'PROJECT NAME', 'MILEAGE', 'TOLL', 'TRAVEL', 'OUTSTATION/\nOVERNIGHT', 'LODGING', 'PARKING', 'ENTERTAINMENT\nFOOD & BEVERAGES', 'TOOLS\nACCESSORIES', 'STATIONERY', 'MEDICAL', 'MISC/OTHERS', 'TOTAL'],
-    ...X.rows.map(r => [range, r.project, r.mileage, r.toll, r.travel, r.outOver, r.lodging, r.parking, r.fnb, r.tools, r.stationery, r.medical, r.others, r.total]),
-    ['', 'MILEAGE ALLOWANCE OFFSET', X.offset ? -X.offset : 0],
-    ['', 'Details for others claims:', claim.otherDetails || ''],
-    [], ['Sub-Total', '', X.sub.mileage, X.sub.toll, X.sub.travel, X.sub.outOver, X.sub.lodging, X.sub.parking, X.sub.fnb, X.sub.tools, X.sub.stationery, X.sub.medical, X.sub.others],
-    ['', '', '', '', '', '', '', '', '', '', '', 'Total Expenses ', '', X.totalExpenses],
-    ['', '            Approved by:'],
-    ['', claim.approvedBy || '…………………………………………………..'],
-    ['', 'Checked by: ' + (claim.checkedBy || '…………………………')],
-    ['', '', '', '', '', '', '', '', '', '', 'Total (Allowance)', '', '', X.allowanceTotal],
-    ['', '', '', '', '', '', '', '', '', '', 'Total (Claim)', '', '', X.claimTotal],
-    ['', '', '', '', '', '', '', '', '', '', 'Claim Reimbursement', '', 'RM', X.reimbursement]];
-  const ws1 = XLSX.utils.aoa_to_sheet(cf); ws1['!cols'] = [{ wch: 24 }, { wch: 30 }, ...Array(12).fill({ wch: 13 })];
-  XLSX.utils.book_append_sheet(wb, ws1, 'CLAIM FORM');
+  const wb = new ExcelJS.Workbook(); wb.creator = c.name || '';
+
+  // 1. CLAIM FORM
+  let ws = wb.addWorksheet('CLAIM FORM'); xlPrint(ws);
+  ws.columns = [{ width: 23 }, { width: 30 }, ...Array.from({ length: 12 }, () => ({ width: 13 }))];
+  let r = xlHead(ws, c, claim, 'EXPENSES PROJECT CLAIM FORM', 14);
+  const K = ['mileage', 'toll', 'travel', 'outOver', 'lodging', 'parking', 'fnb', 'tools', 'stationery', 'medical', 'others'];
+  const rows = X.rows.map(x => [range, x.project, ...K.map(k => x[k]), x.total]);
+  rows.push(['', 'MILEAGE ALLOWANCE OFFSET', X.offset ? -X.offset : 0, ...Array(11).fill('')]);
+  if (claim.otherDetails) rows.push(['', 'Details for others claims: ' + claim.otherDetails, ...Array(12).fill('')]);
+  rows.push(['Sub-Total', '', ...K.map(k => X.sub[k]), X.totalExpenses]);
+  r = xlTable(ws, r, ['DATE RANGE', 'PROJECT NAME', 'MILEAGE', 'TOLL', 'TRAVEL', 'OUTSTATION/\nOVERNIGHT', 'LODGING', 'PARKING', 'ENTERTAINMENT\nFOOD & BEVERAGES', 'TOOLS\nACCESSORIES', 'STATIONERY', 'MEDICAL', 'MISC/OTHERS', 'TOTAL'], rows, { totalRows: [rows.length - 1], headH: 42 });
+  const sEnd = xlSummary(ws, r + 1, 12, [['Total Expenses', X.totalExpenses, 1], ['Total (Allowance)', X.allowanceTotal], ['Total (Claim)', X.claimTotal], ['Claim Reimbursement (RM)', X.reimbursement, 2]]);
+  xlSign(ws, sEnd + 2, claim);
+
+  // 2. ALLOWANCE FORM
+  ws = wb.addWorksheet('ALLOWANCE FORM'); xlPrint(ws);
+  ws.columns = [{ width: 8 }, { width: 46 }, { width: 18 }];
+  r = xlHead(ws, c, claim, 'ALLOWANCE CLAIM FORM', 3);
   const A = claim.allowances || [];
-  const af = [...top('ALLOWANCE CLAIM  FORM'),
-    ['No', 'Expenses Details', 'Project\nAllowance'],
-    ...A.map((a, i) => [i + 1, a.details || '', a.project || '']),
-    ['Sub-Total', '', X.allowSub.project],
-    ['', 'Total Expenses ', X.allowanceTotal], ['            Approved by:'], ['', claim.approvedBy || '…………………………………………………..']];
-  const ws2 = XLSX.utils.aoa_to_sheet(af); ws2['!cols'] = [{ wch: 8 }, { wch: 34 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, ws2, 'ALLOWANCE FORM');
+  const arows = A.map((a, i) => [i + 1, a.details || '', Number(a.project || 0)]);
+  arows.push(['', 'Sub-Total', X.allowSub.project]);
+  r = xlTable(ws, r, ['No', 'Expenses Details', 'Project\nAllowance'], arows, { totalRows: [arows.length - 1], intCols: [0] });
+  ws.getCell(r, 2).value = 'Outstation & overnight are claimed in the Justification Form.'; ws.getCell(r, 2).font = { italic: true, size: 9, color: { argb: 'FF777777' } };
+  xlSummary(ws, r + 1, 2, [['Total Expenses', X.allowanceTotal, 2]]);
+  xlSign(ws, r + 4, claim);
+
+  // 3. SST PURCHASES
+  ws = wb.addWorksheet('SST CLAIM FORM'); xlPrint(ws);
+  ws.columns = [{ width: 12 }, { width: 28 }, { width: 18 }, { width: 15 }, { width: 22 }, { width: 15 }, { width: 11 }, { width: 17 }, { width: 30 }];
+  r = xlHead(ws, c, claim, 'SST PURCHASES CLAIM FORM', 9);
   const P = claim.purchases || [];
-  const sf = [...top('SST PURCHASES CLAIM FORM'),
-    ['Date', 'Supplier Name', 'SST Code', 'Invoice No', 'Expenses Details', 'Total Exclude SST', `${R.sst}% SST`, `Total Inclusive ${R.sst}% SST`, 'Remark'],
-    ...P.map(p => [dmy(p.date), p.supplier || '', p.sstCode || '', p.invoice || '', p.cat, Number(p.amount || 0), Number(p.sst || 0), purchaseTotal(p), p.project || '']),
-    ['', '', '', '', 'Sub-Total', X.sstSub.amount, X.sstSub.sst, X.sstSub.total],
-    ['', '', '', '', '', 'Total Expenses ', '', X.sstSub.total], ['            Approved by:'], ['', claim.approvedBy || '…………………………………………………..']];
-  const ws3 = XLSX.utils.aoa_to_sheet(sf); ws3['!cols'] = [{ wch: 12 }, { wch: 26 }, { wch: 10 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 10 }, { wch: 16 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, ws3, 'SST CLAIM FORM');
-  const J = [...(claim.journeys || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const prow = P.map(p => [dmy(p.date), p.supplier || '', p.sstCode || '', p.invoice || '', p.cat || '', Number(p.amount || 0), Number(p.sst || 0), purchaseTotal(p), p.project || '']);
+  prow.push(['', '', '', '', 'Sub-Total', X.sstSub.amount, X.sstSub.sst, X.sstSub.total, '']);
+  r = xlTable(ws, r, ['Date', 'Supplier Name', 'SST Code', 'Invoice No', 'Expenses Details', 'Total Exclude SST', `${R.sst}% SST`, `Total Inclusive ${R.sst}% SST`, 'Remark'], prow, { totalRows: [prow.length - 1] });
+  xlSummary(ws, r + 1, 7, [['Total Expenses', X.sstSub.total, 2]]);
+  xlSign(ws, r + 3, claim);
+
+  // 4. JUSTIFICATION FORM
+  ws = wb.addWorksheet('JUSTIFICATION FORM'); xlPrint(ws);
+  ws.columns = [{ width: 12 }, { width: 38 }, { width: 26 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 13 }, { width: 28 }];
+  r = xlHead(ws, c, claim, 'EXPENSES CLAIM JUSTIFICATION FORM', 10);
+  const J = [...(claim.journeys || [])].sort((x, y) => (x.date || '').localeCompare(y.date || ''));
   const sumJ = (f) => J.reduce((a, j) => a + Number(j[f] || 0), 0);
-  const jf = [...top('EXPENSES  CLAIM JUSTIFICATION FORM'),
-    ['Date', 'Journey From/To', 'Purpose of Journey', 'Mileage\n(km)', 'Toll\n(RM)', 'Parking\n(RM)', 'Outstation', 'Overnight', 'Total \n(RM)', 'Remarks '],
-    ...J.map(j => [dmy(j.date), j.route || '', j.project || '', j.km || '', j.toll || '', j.parking || '', j.outstation || '', j.overnight || '', journeyTotal(j, R), j.remarks || '']),
-    ['', '', '', sumJ('km'), sumJ('toll'), sumJ('parking'), sumJ('outstation') * R.outstation, sumJ('overnight') * R.overnight, X.justTotal]];
-  const ws4 = XLSX.utils.aoa_to_sheet(jf); ws4['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 28 }, ...Array(6).fill({ wch: 11 }), { wch: 26 }];
-  XLSX.utils.book_append_sheet(wb, ws4, 'JUSTIFICATION FORM');
-  XLSX.writeFile(wb, `Claim_${claim.workerId}_${claim.month}.xlsx`);
+  const jrows = J.map(j => [dmy(j.date), j.route || '', j.project || '', Number(j.km || 0), Number(j.toll || 0), Number(j.parking || 0), Number(j.outstation || 0), Number(j.overnight || 0), journeyTotal(j, R), j.remarks || '']);
+  jrows.push(['', '', 'Total', sumJ('km'), sumJ('toll'), sumJ('parking'), sumJ('outstation') * R.outstation, sumJ('overnight') * R.overnight, r2(J.reduce((a, j) => a + journeyTotal(j, R), 0)), '']);
+  if (X.kmTotal > 0) jrows.push(['', '', 'Less mileage allowance offset', '', '', '', '', '', -X.offset, '']);
+  jrows.push(['', '', 'Grand Total', '', '', '', '', '', X.justTotal, '']);
+  r = xlTable(ws, r, ['Date', 'Journey From/To', 'Purpose of Journey', 'Mileage\n(km)', 'Toll\n(RM)', 'Parking\n(RM)', 'Outstation', 'Overnight', 'Total\n(RM)', 'Remarks'], jrows,
+    { totalRows: [J.length, ...(X.kmTotal > 0 ? [J.length + 1] : []), jrows.length - 1] });
+  ws.getCell(r, 2).value = `Mileage × RM${R.km}/km · Outstation × RM${R.outstation} · Overnight × RM${R.overnight}`; ws.getCell(r, 2).font = { italic: true, size: 9, color: { argb: 'FF777777' } };
+  xlSign(ws, r + 2, claim);
+
+  await xlDownload(wb, `Claim_${claim.workerId}_${claim.month}.xlsx`);
   return true;
+}
+
+// Ringkasan tuntutan sebulan (admin)
+export async function claimSummaryExcel(c, list, month) {
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet(month); xlPrint(ws);
+  const H = ['ID', 'Name', 'Status', 'Mileage', 'Toll', 'Travel', 'Outstation/\nOvernight', 'Lodging', 'Parking', 'F&B', 'Tools', 'Stationery', 'Medical', 'Others', 'Total\nExpenses', 'Total\n(Allowance)', 'Claim\nReimbursement', 'Checked by', 'Approved by', 'Paid ref'];
+  ws.columns = [{ width: 11 }, { width: 26 }, { width: 12 }, ...Array.from({ length: 14 }, () => ({ width: 12 })), { width: 18 }, { width: 18 }, { width: 16 }];
+  ws.mergeCells(1, 1, 1, H.length); ws.getCell(1, 1).value = c.name || ''; ws.getCell(1, 1).font = { bold: true, size: 14 };
+  ws.mergeCells(2, 1, 2, H.length); ws.getCell(2, 1).value = `CLAIMS SUMMARY — ${monthTxt(month)}`; ws.getCell(2, 1).font = { bold: true, size: 12 };
+  const K = ['mileage', 'toll', 'travel', 'outOver', 'lodging', 'parking', 'fnb', 'tools', 'stationery', 'medical', 'others'];
+  const rows = list.map(x => { const X = computeClaim(x, c); return [x.workerId || '', x.name || '', x.status || '', ...K.map(k => X.sub[k]), X.totalExpenses, X.allowanceTotal, X.reimbursement, x.checkedBy || '', x.approvedBy || '', x.paidRef || '']; });
+  const tot = ['', 'TOTAL', '', ...Array.from({ length: 14 }, (_, i) => r2(rows.reduce((a, row) => a + Number(row[3 + i] || 0), 0))), '', '', ''];
+  rows.push(tot);
+  xlTable(ws, 4, H, rows, { totalRows: [rows.length - 1], headH: 34 });
+  ws.views = [{ state: 'frozen', ySplit: 4, xSplit: 2 }];
+  await xlDownload(wb, `Claims_${c.code || ''}_${month}.xlsx`);
 }
 
 // Garis masa status (untuk pekerja & admin)

@@ -294,3 +294,11 @@ td .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;cursor:poin
 .tl-s.done .tl-d{background:var(--gold);color:#1a1405;border-color:var(--gold)}
 .tl-s.now .tl-d{border-color:var(--gold);color:var(--gold)}
 @media(max-width:560px){.tl{grid-template-columns:1fr 1fr}}
+
+.cal-t{display:block;font:600 9px/1.15 var(--f);opacity:.9;margin-top:2px;letter-spacing:-.2px}
+.cal-s{display:block;font:600 8.5px var(--f);opacity:.75;margin-top:2px;text-transform:uppercase;letter-spacing:.2px}
+
+/* Titik perjalanan tuntutan */
+.jpt{display:grid;grid-template-columns:64px 1fr 1fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
+.jpt-n{font-size:.75rem;color:var(--muted);font-weight:700}
+@media(max-width:560px){.jpt{grid-template-columns:1fr auto auto}.jpt-n,.jpt [data-pn]{grid-column:1/-1}}
