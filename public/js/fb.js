@@ -9,10 +9,14 @@ import { FIREBASE_CONFIG, DB_ID, REGION, WORKER_EMAIL_DOMAIN } from "./config.js
 export const app = initializeApp(FIREBASE_CONFIG);
 export const auth = getAuth(app);
 
-// Cache tempatan: punch tetap disimpan semasa tiada internet dan dihantar bila talian pulih
+// Cache tempatan (luar talian) HANYA untuk halaman pekerja & kiosk — punch tetap disimpan semasa tiada internet.
+// Halaman admin / Super Admin guna sambungan terus supaya simpanan tidak tersekat bila banyak tab dibuka.
+const OFFLINE_PAGE = !/\/(admin|superadmin)(\.html)?$/i.test(location.pathname);
 let _db;
 try {
-  _db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }, DB_ID);
+  _db = OFFLINE_PAGE
+    ? initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }, DB_ID)
+    : initializeFirestore(app, {}, DB_ID);
 } catch (e) {
   _db = getFirestore(app, DB_ID);
 }
