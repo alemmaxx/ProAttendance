@@ -1,5 +1,6 @@
 // ProAttendance — Super Admin (pemilik sistem)
 import { auth, db } from './fb.js';
+import { APP_VERSION } from './config.js';
 import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
@@ -86,7 +87,7 @@ function renderShell() {
     <aside class="side" id="side">
       <div class="side-brand"><span class="logo logo-ini">${icon('shield', 22)}</span><div><div class="nm">ProAttendance</div><div class="xs" style="opacity:.7">Super Admin</div></div></div>
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span>${t}</span></button>`).join('')}</nav>
-      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div>
+      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${L('Keluar', 'Logout')}</button></div></div>
     </aside>
     <div class="side-bg" id="sideBg"></div>

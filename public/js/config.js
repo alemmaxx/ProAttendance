@@ -28,3 +28,6 @@ export const SDK = "10.12.2";
 // Web Push certificates → "Generate key pair", kemudian tampal kunci di sini.
 // Biarkan kosong untuk matikan notifikasi push.
 export const VAPID_KEY = "";
+
+// Versi aplikasi (dipaparkan di bawah menu — untuk pastikan deploy terkini)
+export const APP_VERSION = "2026.11.19-b";

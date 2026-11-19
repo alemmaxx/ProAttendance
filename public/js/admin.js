@@ -1,5 +1,6 @@
 // ProAttendance — Halaman Admin Syarikat
 import { auth, db, call, workerEmail, FIREBASE_CONFIG } from './fb.js';
+import { APP_VERSION } from './config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut,
@@ -316,7 +317,7 @@ function renderShell() {
       ${isOwner() && !S.me.support ? `<div style="padding:.5rem .8rem"><select class="input" id="coSwitch" style="font-size:.85rem;padding:.4rem .6rem;min-height:38px"></select></div>` : ''}
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
-        <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div>
+        <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 16)} ${L('Keluar', 'Logout')}</button></div>
       </div>
     </aside>

@@ -1,5 +1,6 @@
 // ProAttendance — Halaman Pekerja
 import { auth, db, workerEmail } from './fb.js';
+import { APP_VERSION } from './config.js';
 import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
@@ -1347,7 +1348,7 @@ function viewProfil() {
     <button class="btn btn-ghost btn-block" id="langB">${L('Bahasa: Bahasa Melayu', 'Language: English')}</button>
     <button class="btn btn-danger btn-block" id="lo">${icon('out', 18)} ${L('Log Keluar', 'Log Out')}</button>
   </div>
-  <p class="center xs muted" style="margin-top:1rem">ProAttendance</p>`;
+  <p class="center xs muted" style="margin-top:1rem">ProAttendance · v${APP_VERSION}</p>`;
   $('#chPin').onclick = () => pinModal(false);
   $$('[data-myc]').forEach(r => r.onclick = () => claimEditor(r.dataset.myc, 's'));
   pushAvailable().then(ok => {

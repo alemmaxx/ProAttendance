@@ -29,8 +29,16 @@ if not exist ".git" (
   git branch --set-upstream-to=origin/main main >nul
 ) else (
   echo [1/3] Ambil kod terkini dari GitHub ...
-  git pull origin main
+  git fetch origin main
+  if errorlevel 1 (
+    echo [X] Gagal ambil kod dari GitHub. Semak internet, kemudian cuba lagi.
+    pause
+    exit /b 1
+  )
+  git reset --hard origin/main
 )
+echo Versi kod GitHub:
+git log -1 --format="  %%h  %%s"
 echo.
 
 :deploy
