@@ -92,7 +92,7 @@ function renderShell() {
     <div class="side-bg" id="sideBg"></div>
     <div class="main">
       <header class="topbar"><button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button><h1 id="vTitle"></h1>
-        <a class="btn btn-sm btn-soft" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Syarikat saya / Demo', 'My company / Demo')}</a></header>
+        <a class="btn btn-sm btn-primary" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Admin Syarikat', 'Company Admin')}</a></header>
       <div class="content"><div class="pghero no-print"><div class="tag" id="vTag"></div><h2 class="gold-h" id="vH"></h2><p class="sub" id="vSub"></p></div><div id="view"></div></div>
     </div>
   </div>`;
@@ -134,6 +134,15 @@ async function viewCompanies() {
   loading();
   try { await loadCompanies(); } catch (e) { $('#view').innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; return; }
   $('#view').innerHTML = `
+  <div class="card" style="border-color:var(--gold);background:var(--gold2)">
+    <h3 style="margin-top:0">${icon('building', 18)} ${L('Halaman Admin Syarikat', 'Company Admin Page')}</h3>
+    <p class="small muted">${L('Buka halaman admin untuk syarikat anda sendiri / demo. Untuk syarikat pelanggan, tekan "Buka" pada senarai di bawah (mod sokongan).', 'Open the admin page for your own / demo company. For client companies, press "Open" in the list below (support mode).')}</p>
+    <div class="row">
+      <a class="btn btn-primary" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Buka Admin Syarikat Saya', 'Open My Company Admin')}</a>
+      <a class="btn btn-ghost" href="/admin.html?register=1" target="_blank">${icon('plus', 16)} ${L('Daftar Syarikat Demo Baharu', 'Register New Demo Company')}</a>
+      <a class="btn btn-ghost" href="/" target="_blank">${icon('users', 16)} ${L('Halaman Pekerja', 'Staff Page')}</a>
+    </div>
+  </div>
   <div class="card">
     <div class="card-head"><input class="input" id="q" style="max-width:300px" placeholder="${L('Cari nama / kod / e-mel…', 'Search name / code / email…')}">
       <select class="input" id="fs" style="width:auto"><option value="">${L('Semua', 'All')}</option><option value="trial">${L('Percubaan', 'Trial')}</option>
