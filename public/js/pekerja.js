@@ -1591,6 +1591,7 @@ function viewProfil() {
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
     <button class="btn btn-ghost btn-block hide" id="pushB">${icon('bell', 18)} ${L('Hidupkan notifikasi', 'Turn on notifications')}</button>
     ${installBtn('btn btn-soft btn-block')}
+    <a class="btn btn-ghost btn-block" href="/panduan.html#s1" target="_blank">${icon('doc', 18)} ${L('Panduan', 'Help')}</a>
     ${pkSupported() ? `<button class="btn btn-ghost btn-block" id="pkBtn">${icon('finger', 18)} ${pkHas() ? L('Cap jari / Face ID: AKTIF (tekan untuk buang)', 'Fingerprint / Face ID: ON (tap to remove)') : L('Aktifkan Cap Jari / Face ID', 'Enable Fingerprint / Face ID')}</button>` : ''}
     <button class="btn btn-ghost btn-block" id="chPin">${icon('shield', 18)} ${L('Tukar PIN', 'Change PIN')}</button>
     <button class="btn btn-ghost btn-block" id="langB">${L('Bahasa: Bahasa Melayu', 'Language: English')}</button>

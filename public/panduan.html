@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ms">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panduan Pengguna — ProAttendance</title>
+  <meta name="theme-color" content="#0b0f17">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    .doc{max-width:860px;margin:0 auto;padding:28px 20px 60px;line-height:1.65}
+    .doc h1{font-size:32px;margin:14px 0 4px} .doc h2{font-size:20px;margin:30px 0 8px;color:var(--gold);scroll-margin-top:16px}
+    .doc ol{padding-left:1.3rem} .doc li{margin:.35rem 0} .toc{font-size:.9rem;line-height:1.9}
+    .doc section{display:none} .doc section.on{display:block}
+  </style>
+</head>
+<body>
+<main class="doc">
+  <div class="row" style="gap:10px;justify-content:space-between"><div class="row" style="gap:10px"><img src="/icon.svg" alt="" width="36" height="36"><b>ProAttendance</b></div>
+    <div class="row"><button class="btn btn-sm btn-soft" data-l="ms">BM</button><button class="btn btn-sm btn-ghost" data-l="en">EN</button><button class="btn btn-sm btn-ghost" onclick="print()">Cetak / Print</button></div></div>
+  <section data-sec="ms" class="on">
+    <h1>Panduan Pengguna</h1>
+    <p class="toc"><a href="#s0">Mula di sini (pemilik syarikat)</a> · <a href="#s1">Pekerja — punch & permohonan</a> · <a href="#s2">Penyelia</a> · <a href="#s3">Finance / Boss</a> · <a href="#s4">Soalan lazim</a></p>
+    <h2 id="s0">1. Mula di sini (pemilik syarikat)</h2>
+    <ol>
+      <li>Daftar di <b>proattendancemy.web.app</b> → isi nama syarikat & kod syarikat (cth: ABC). Kod menjadi awalan ID pekerja (ABC001, ABC002…).</li>
+      <li><b>Tetapan → Profil Syarikat</b>: logo, alamat, telefon & warna. Logo & nama syarikat dipaparkan kepada pekerja.</li>
+      <li><b>Tetapan → Waktu Kerja</b>: jam kerja biasa, rehat automatik, OT automatik, templat syif (Pagi / Petang / Malam).</li>
+      <li><b>Lokasi</b>: tambah pejabat / tapak dengan GPS & radius. Pekerja hanya boleh punch dalam kawasan ini (jika diaktifkan).</li>
+      <li><b>Pekerja → Tambah Pekerja</b> atau <b>Import Excel</b> (muat turun templat, isi, muat naik). Beri ID & PIN kepada pekerja.</li>
+      <li><b>Tetapan → Admin & Penyelia</b>: jemput pengurus (finance) & penyelia. Penyelia tidak nampak gaji.</li>
+    </ol>
+    <h2 id="s1">2. Pekerja — punch & permohonan</h2>
+    <ol>
+      <li>Buka <b>proattendancemy.web.app/worker</b> → log masuk dengan ID + PIN → tekan <b>Install App</b> supaya ada ikon di telefon.</li>
+      <li>Selepas log masuk pertama, aktifkan <b>Cap Jari / Face ID</b> — lain kali tak perlu PIN.</li>
+      <li>Tekan butang besar untuk <b>Mula Kerja</b> / <b>Tamat Kerja</b> (ada pop-up pengesahan). GPS / QR / swafoto ikut tetapan majikan.</li>
+      <li>Kalendar menunjukkan masa masuk / keluar & status setiap hari. Tekan tarikh untuk butiran & catatan.</li>
+      <li><b>Mohon</b>: cuti (lihat baki), OT, pembetulan punch, pendahuluan gaji, tukar syif & <b>Borang Tuntutan bulanan</b>.</li>
+      <li>Di luar pejabat? Tekan <b>Update Kerja</b> — lokasi & kerja masuk ke Jadual & Catatan.</li>
+      <li><b>Profil</b>: slip gaji, status tuntutan, tukar PIN, notifikasi.</li>
+    </ol>
+    <h2 id="s2">3. Penyelia</h2>
+    <ol>
+      <li><b>Kelulusan</b>: luluskan / tolak cuti, OT & pembetulan punch (tolak wajib beri sebab).</li>
+      <li><b>Tuntutan</b>: semak borang pekerja → <b>Semak & hantar ke finance</b> atau tolak untuk dibetulkan.</li>
+      <li><b>Jadual</b>: guna <b>Jadual Auto</b> untuk syif bergilir; tekan nama pekerja / tajuk hari untuk ubah sekali gus.</li>
+    </ol>
+    <h2 id="s3">4. Finance / Boss</h2>
+    <ol>
+      <li><b>Gaji → Tetapan Kewangan</b>: kaedah caruman (jadual rasmi disyorkan), senarai elaun & KWSP/PERKESO, PCB setiap pekerja, kadar OT, kadar tuntutan & projek.</li>
+      <li><b>Gaji → Proses</b>: pilih bulan → semak setiap pekerja (boleh sunting) → <b>Kunci</b>. Slip gaji terus dihantar ke app pekerja.</li>
+      <li>Eksport: Excel gaji, fail bank (CSV), borang EA.</li>
+      <li><b>Tuntutan</b>: luluskan borang yang sudah disemak → <b>Tanda dibayar</b>. Tuntutan TIDAK masuk slip gaji; OT yang diluluskan masuk slip gaji.</li>
+      <li><b>Langganan</b>: bayar melalui ToyyibPay; resit boleh dicetak dari Sejarah Bayaran.</li>
+    </ol>
+    <h2 id="s4">5. Soalan lazim</h2>
+    <ol>
+      <li><b>Pekerja lupa PIN?</b> Pekerja → pilih pekerja → Reset PIN. Atau guna Cap Jari / Face ID.</li>
+      <li><b>Pekerja tukar telefon?</b> Pekerja → Reset telefon berdaftar, kemudian pekerja log masuk di telefon baharu.</li>
+      <li><b>Punch tiada internet?</b> Punch disimpan dalam telefon & dihantar automatik bila talian pulih.</li>
+      <li><b>Lupa punch keluar?</b> Pekerja mohon Pembetulan Punch; penyelia luluskan.</li>
+      <li><b>Caruman tidak tepat?</b> Pastikan Status (Warganegara / PR / Asing) & Tarikh Lahir pekerja diisi — kiraan ikut jadual rasmi & umur.</li>
+      <li><b>Notifikasi tidak sampai?</b> Profil / Tetapan → Hidupkan notifikasi. Di iPhone, app mesti di-install (Tambah ke Skrin Utama).</li>
+    </ol>
+    <p class="muted small" style="margin-top:2rem">Lihat juga: <a href="/privasi.html">Notis Privasi & Terma</a></p>
+  </section>
+  <section data-sec="en">
+    <h1>User Guide</h1>
+    <p class="toc"><a href="#s0">Start here (company owner)</a> · <a href="#s1">Staff — punching & requests</a> · <a href="#s2">Supervisors</a> · <a href="#s3">Finance / Boss</a> · <a href="#s4">FAQ</a></p>
+    <h2 id="s0">1. Start here (company owner)</h2>
+    <ol>
+      <li>Sign up at <b>proattendancemy.web.app</b> → enter the company name & code (e.g. ABC). The code prefixes staff IDs (ABC001, ABC002…).</li>
+      <li><b>Settings → Company Profile</b>: logo, address, phone & colour. Your logo & name are shown to staff.</li>
+      <li><b>Settings → Work Hours</b>: normal hours, automatic break, automatic OT, shift templates (Morning / Evening / Night).</li>
+      <li><b>Locations</b>: add offices / sites with GPS & radius. Staff can only punch inside these (if enabled).</li>
+      <li><b>Staff → Add Staff</b> or <b>Import Excel</b> (download template, fill, upload). Give each person their ID & PIN.</li>
+      <li><b>Settings → Admins & Supervisors</b>: invite managers (finance) & supervisors. Supervisors cannot see pay.</li>
+    </ol>
+    <h2 id="s1">2. Staff — punching & requests</h2>
+    <ol>
+      <li>Open <b>proattendancemy.web.app/worker</b> → log in with ID + PIN → tap <b>Install App</b> for a home-screen icon.</li>
+      <li>After the first login, enable <b>Fingerprint / Face ID</b> — no PIN needed next time.</li>
+      <li>Tap the big button to <b>Start Work</b> / <b>End Work</b> (with a confirmation pop-up). GPS / QR / selfie per employer settings.</li>
+      <li>The calendar shows clock-in / out times & status each day. Tap a date for details & notes.</li>
+      <li><b>Requests</b>: leave (see balance), OT, punch fix, salary advance, shift swap & the <b>monthly Claim Form</b>.</li>
+      <li>Outside the office? Tap <b>Work Update</b> — location & work go into Schedule & Notes.</li>
+      <li><b>Profile</b>: payslips, claim status, change PIN, notifications.</li>
+    </ol>
+    <h2 id="s2">3. Supervisors</h2>
+    <ol>
+      <li><b>Approvals</b>: approve / reject leave, OT & punch fixes (rejection needs a reason).</li>
+      <li><b>Claims</b>: check staff forms → <b>Check & send to finance</b> or reject for correction.</li>
+      <li><b>Roster</b>: use <b>Auto Roster</b> for rotating shifts; tap a staff name / day header to change in bulk.</li>
+    </ol>
+    <h2 id="s3">4. Finance / Boss</h2>
+    <ol>
+      <li><b>Payroll → Finance Settings</b>: contribution method (official tables recommended), allowance list & EPF/SOCSO, PCB per staff, OT rates, claim rates & projects.</li>
+      <li><b>Payroll → Run</b>: choose month → review each staff member (editable) → <b>Lock</b>. Payslips go straight to the staff app.</li>
+      <li>Exports: payroll Excel, bank file (CSV), EA forms.</li>
+      <li><b>Claims</b>: approve checked forms → <b>Mark as paid</b>. Claims are NOT in the payslip; approved OT is.</li>
+      <li><b>Subscription</b>: pay via ToyyibPay; print receipts from Payment History.</li>
+    </ol>
+    <h2 id="s4">5. FAQ</h2>
+    <ol>
+      <li><b>Staff forgot PIN?</b> Staff → choose the person → Reset PIN. Or use Fingerprint / Face ID.</li>
+      <li><b>Staff changed phone?</b> Staff → Reset registered phone, then they log in on the new phone.</li>
+      <li><b>Punch with no internet?</b> The punch is saved on the phone & sent automatically when back online.</li>
+      <li><b>Forgot to clock out?</b> Staff request a Punch Fix; the supervisor approves.</li>
+      <li><b>Contributions look wrong?</b> Make sure the staff Status (Citizen / PR / Foreign) & Date of Birth are filled in — calculations follow the official tables & age.</li>
+      <li><b>Notifications not arriving?</b> Profile / Settings → Turn on notifications. On iPhone, the app must be installed (Add to Home Screen).</li>
+    </ol>
+    <p class="muted small" style="margin-top:2rem">See also: <a href="/privasi.html">Privacy Notice & Terms</a></p>
+  </section>
+</main>
+<script>
+  const pick = (l) => { document.querySelectorAll('[data-sec]').forEach(s => s.classList.toggle('on', s.dataset.sec === l)); document.querySelectorAll('[data-l]').forEach(b => b.className = 'btn btn-sm ' + (b.dataset.l === l ? 'btn-soft' : 'btn-ghost')); document.documentElement.lang = l; };
+  document.querySelectorAll('[data-l]').forEach(b => b.onclick = () => pick(b.dataset.l));
+  try { if (localStorage.getItem('pa_lang') === 'en') pick('en'); } catch (e) {}
+</script>
+</body>
+</html>

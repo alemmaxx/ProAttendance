@@ -325,6 +325,7 @@ function renderShell() {
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
         <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
+        <a class="btn btn-sm btn-ghost btn-block" href="/panduan.html" target="_blank">${icon('doc', 14)} ${L('Panduan Pengguna', 'User Guide')}</a>
         ${installBtn('btn btn-sm btn-soft btn-block')}
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 16)} ${L('Keluar', 'Logout')}</button></div>
       </div>
