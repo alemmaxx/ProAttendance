@@ -171,6 +171,7 @@ export function applyStatutory(item, P, w = {}) {
   const epfBase = Math.max(0, item.earnings.filter(e => e.epf).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const socsoBase = Math.max(0, item.earnings.filter(e => e.socso).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const pick = (ov, base, pct) => (ov !== undefined && ov !== null && ov !== '') ? r2(ov) : r2(base * Number(pct || 0) / 100);
+  item.bases = { epf: r2(epfBase), socso: r2(socsoBase) };
   let ee, skbbk = 0;
   if (P.statMode !== 'percent') {
     // Jadual rasmi KWSP / PERKESO / SIP / SKBBK ikut status & umur pekerja
@@ -289,7 +290,8 @@ export function payslipClassic(c, slip, period) {
   const sumK = (arr, k) => arr.filter(x => x.kind === k).reduce((a, x) => a + Number(x.amount || 0), 0);
   const bonus = sumK(E, 'bonus');
   const arrears = E.filter(e => e.kind === 'other' && /tunggakan|arrears/i.test(e.name || '')).reduce((a, e) => a + Number(e.amount || 0), 0);
-  const allow = E.filter(e => e.kind === 'allow' || (e.kind === 'other' && !/tunggakan|arrears/i.test(e.name || '')) || e.kind === 'claim');
+  const allow = E.filter(e => e.kind === 'allow');                    // elaun HANYA dari senarai profil pekerja
+  const otherEarn = E.filter(e => e.kind === 'other' && !/tunggakan|arrears/i.test(e.name || ''));
   // Potongan "lain-lain" mengikut nama
   const used = new Set();
   const other = OTHER_DED.map(([k, lbl, re]) => {
@@ -311,7 +313,8 @@ export function payslipClassic(c, slip, period) {
     [L('Gaji Asas', 'Basic Salary'), sumK(E, 'basic')],
     [L('Tunggakan Gaji', 'Salary Arrears'), arrears],
     [L('Kerja Lebih Masa', 'Overtime'), sumK(E, 'ot')],
-    ...(bonus ? E.filter(e => e.kind === 'bonus').map(e => [e.name || 'Bonus', e.amount]) : [['Bonus', 0]])
+    ...(bonus ? E.filter(e => e.kind === 'bonus').map(e => [e.name || 'Bonus', e.amount]) : [['Bonus', 0]]),
+    ...otherEarn.map(e => [e.name, e.amount])
   ];
   const infoRow = (k, v) => `<tr><td class="ck">${k}</td><td class="cv">${esc(v || '')}</td></tr>`;
   const L2 = (rows) => rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${n2(v)}</td></tr>`).join('');

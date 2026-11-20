@@ -1982,9 +1982,12 @@ function payTotals(items) {
   };
 }
 
+// Status setiap pekerja dalam larian gaji: 'draft' (semakan finance) → 'approved' (slip diterbitkan kepada pekerja)
+const isAp = (x) => x.status === 'approved';
 async function drawPayrun() {
   const box = $('#payBody');
   S.payPeriod = S.payPeriod || todayStr().slice(0, 7);
+  S.paySub = S.paySub || 'draft';
   const period = S.payPeriod;
   box.innerHTML = `
     <div class="card no-print">
@@ -1999,28 +2002,34 @@ async function drawPayrun() {
   let run;
   try { const s = await getDoc(doc(db, 'companies', S.cid, 'payruns', period)); run = s.exists() ? s.data() : null; }
   catch (e) { $('#payOut').innerHTML = `<div class="card"><div class="empty">${esc(authErr(e))}</div></div>`; return; }
+  // Larian lama yang dikunci = semua diluluskan
+  if (run && run.status === 'locked') Object.values(run.items || {}).forEach(x => { if (!x.status) x.status = 'approved'; });
   S.payRun = run;
-  const acts = $('#payActs');
   if (!run) {
     $('#payOut').innerHTML = `<div class="card"><div class="empty">
       <p><b>${esc(periodLabel(period))}</b> — ${L('belum diproses.', 'not processed yet.')}</p>
-      <p class="small">${L('Sistem akan kira gaji asas, elaun, OT diluluskan, cuti, tuntutan, pendahuluan dan caruman ikut tetapan anda. Semua boleh disunting sebelum dikunci.', 'The system calculates basic pay, allowances, approved OT, leave, claims, advances and contributions from your settings. Everything is editable before locking.')}</p>
+      <p class="small">${L('Sistem kira gaji asas, elaun (ikut senarai profil pekerja), OT diluluskan, cuti, pendahuluan & caruman. Finance semak setiap pekerja, lihat slip, kemudian luluskan — hanya slip yang diluluskan dihantar kepada pekerja.', 'The system calculates basic pay, allowances (from each staff profile), approved OT, leave, advances & contributions. Finance reviews each staff member, previews the slip, then approves — only approved slips are sent to staff.')}</p>
       <button class="btn btn-primary" id="genPay">${icon('money', 18)} ${L('Jana Gaji', 'Generate Payroll')}</button></div></div>`;
     $('#genPay').onclick = (e) => generatePayrun(period, e.currentTarget);
     return;
   }
-  const locked = run.status === 'locked';
-  acts.innerHTML = `
-    <span class="badge ${locked ? 'b-ok' : 'b-warn'}">${locked ? L('Dikunci', 'Locked') : L('Draf', 'Draft')}</span>
-    ${!locked ? `<button class="btn btn-sm btn-ghost" id="regen">${L('Jana semula', 'Regenerate')}</button>
-      <button class="btn btn-sm btn-primary" id="lockPay">${icon('check', 16)} ${L('Kunci & Terbit Slip', 'Lock & Publish Slips')}</button>`
-      : `<button class="btn btn-sm btn-ghost" id="unlockPay">${L('Buka kunci', 'Unlock')}</button>`}
-    <button class="btn btn-sm btn-ghost" id="payXl">${icon('dl', 16)} Excel</button>
-    <button class="btn btn-sm btn-ghost" id="payBank">${icon('dl', 16)} ${L('Fail bank', 'Bank file')}</button>
-    <button class="btn btn-sm btn-ghost" id="payPrint">${icon('print', 16)} ${L('Semua slip', 'All slips')}</button>`;
-  const items = Object.values(run.items || {}).sort((a, b) => a.workerId.localeCompare(b.workerId));
-  const t = payTotals(run.items);
+  const all = Object.values(run.items || {}).sort((a, b) => a.workerId.localeCompare(b.workerId));
+  const drafts = all.filter(x => !isAp(x)), approved = all.filter(isAp);
+  const list = S.paySub === 'approved' ? approved : drafts;
+  const t = payTotals(Object.fromEntries(list.map(x => [x.workerId, x])));
+  $('#payActs').innerHTML = S.paySub === 'draft'
+    ? `${drafts.length ? `<button class="btn btn-sm btn-soft" id="payBonus">🎁 ${L('Bonus / Insentif', 'Bonus / Incentive')}</button>
+       <button class="btn btn-sm btn-ghost" id="regen">${L('Jana semula draf', 'Regenerate drafts')}</button>
+       <button class="btn btn-sm btn-primary" id="apSel">${icon('check', 16)} ${L('Luluskan dipilih', 'Approve selected')}</button>` : ''}
+       <button class="btn btn-sm btn-ghost" id="payXl">${icon('dl', 16)} Excel</button>`
+    : `<button class="btn btn-sm btn-ghost" id="payXl">${icon('dl', 16)} Excel</button>
+       <button class="btn btn-sm btn-ghost" id="payBank">${icon('dl', 16)} ${L('Fail bank', 'Bank file')}</button>
+       <button class="btn btn-sm btn-ghost" id="payPrint">${icon('print', 16)} ${L('Semua slip', 'All slips')}</button>`;
   $('#payOut').innerHTML = `
+    <div class="tabs" style="margin-bottom:.8rem">
+      <button data-psub="draft" class="${S.paySub === 'draft' ? 'on' : ''}">📝 ${L('Semakan (Draf)', 'Review (Draft)')} · ${drafts.length}</button>
+      <button data-psub="approved" class="${S.paySub === 'approved' ? 'on' : ''}">✅ ${L('Diluluskan', 'Approved')} · ${approved.length}</button>
+    </div>
     <div class="stats">
       <div class="stat"><div class="n">${t.count}</div><div class="t">${L('Pekerja', 'Staff')}</div></div>
       <div class="stat info"><div class="n" style="font-size:1.15rem">${money(t.gross)}</div><div class="t">${L('Gaji kasar', 'Gross pay')}</div></div>
@@ -2029,47 +2038,194 @@ async function drawPayrun() {
       <div class="stat"><div class="n" style="font-size:1.15rem">${money(t.employer)}</div><div class="t">${L('Caruman majikan', 'Employer contrib.')}</div></div>
     </div>
     <div class="card">
-      <div class="table-wrap"><table>
-        <thead><tr><th>ID</th><th>${L('Nama', 'Name')}</th><th class="right">${L('Kasar', 'Gross')}</th><th class="right">${L('Tuntutan', 'Claims')}</th>
+      ${list.length ? `<div class="table-wrap"><table>
+        <thead><tr>${S.paySub === 'draft' ? `<th><input type="checkbox" id="selAll" checked aria-label="${L('Pilih semua', 'Select all')}"></th>` : ''}<th>ID</th><th>${L('Nama', 'Name')}</th><th class="right">${L('Kasar', 'Gross')}</th>
           <th class="right">${L('Potongan', 'Deductions')}</th><th class="right">${L('Bersih', 'Net')}</th><th></th></tr></thead>
-        <tbody>${items.map(x => `<tr>
-          <td class="mono">${esc(x.workerId)}</td><td>${esc(x.name)}<div class="xs muted">${L('Hadir', 'Present')} ${x.days?.present ?? 0} · OT ${r2((x.days?.ot?.normal || 0) + (x.days?.ot?.rest || 0) + (x.days?.ot?.holiday || 0))}j</div></td>
-          <td class="right">${money(x.gross)}</td><td class="right">${x.claims ? money(x.claims) : '-'}</td><td class="right">${money(x.totalDed)}</td>
-          <td class="right bold">${money(x.net)}</td>
+        <tbody>${list.map(x => `<tr>
+          ${S.paySub === 'draft' ? `<td><input type="checkbox" data-sel="${esc(x.workerId)}" checked aria-label="${esc(x.name)}"></td>` : ''}
+          <td class="mono">${esc(x.workerId)}</td><td><b>${esc(x.name)}</b><div class="xs muted">${L('Hadir', 'Present')} ${x.days?.present ?? 0} · OT ${r2((x.days?.ot?.normal || 0) + (x.days?.ot?.rest || 0) + (x.days?.ot?.holiday || 0))}j${(x.earnings || []).some(e => e.kind === 'bonus') ? ' · 🎁' : ''}${isAp(x) && x.approvedBy ? ` · ✓ ${esc(x.approvedBy)}` : ''}</div></td>
+          <td class="right">${money(x.gross)}</td><td class="right">${money(x.totalDed)}</td><td class="right bold">${money(x.net)}</td>
           <td class="right" style="white-space:nowrap">
-            <button class="btn btn-sm btn-soft" data-pcal="${esc(x.workerId)}" title="${L('Semak kalendar', 'Check calendar')}">${icon('cal', 14)}</button>
-            ${!locked ? `<button class="btn btn-sm btn-ghost" data-pe="${esc(x.workerId)}">${L('Sunting', 'Edit')}</button>` : ''}
-            <button class="btn btn-sm btn-ghost" data-ps="${esc(x.workerId)}">${L('Slip', 'Slip')}</button>
+            <button class="btn btn-sm btn-soft" data-pcal="${esc(x.workerId)}" title="${L('Kalendar', 'Calendar')}">${icon('cal', 14)}</button>
+            <button class="btn btn-sm btn-primary" data-pdet="${esc(x.workerId)}">${L('Butiran & Slip', 'Details & Slip')}</button>
+            ${isAp(x) ? `<button class="btn btn-sm btn-ghost" data-punap="${esc(x.workerId)}">${L('Tarik balik', 'Withdraw')}</button>` : `<button class="btn btn-sm btn-ok" data-pap="${esc(x.workerId)}">${icon('check', 14)} ${L('Lulus', 'Approve')}</button>`}
           </td></tr>`).join('')}</tbody>
-        <tfoot><tr><th></th><th>${L('Jumlah', 'Total')}</th><th class="right">${money(t.gross)}</th><th class="right">${money(t.claims)}</th><th class="right">${money(t.ded)}</th><th class="right">${money(t.net)}</th><th></th></tr></tfoot>
-      </table></div>
+        <tfoot><tr>${S.paySub === 'draft' ? '<th></th>' : ''}<th></th><th>${L('Jumlah', 'Total')}</th><th class="right">${money(t.gross)}</th><th class="right">${money(t.ded)}</th><th class="right">${money(t.net)}</th><th></th></tr></tfoot>
+      </table></div>`
+      : `<div class="empty">${S.paySub === 'draft' ? (approved.length ? L('Semua pekerja sudah diluluskan untuk bulan ini. 🎉', 'All staff are approved for this month. 🎉') : L('Tiada draf.', 'No drafts.')) : L('Belum ada slip diluluskan bulan ini.', 'No approved slips this month yet.')}</div>`}
     </div>
     <div class="card small">
       <b>${L('Ringkasan caruman (pekerja + majikan)', 'Contributions summary (employee + employer)')}</b>
       <div class="row" style="margin-top:.4rem">
         <span class="badge">${L('KWSP', 'EPF')}: ${money(t.epf)}</span><span class="badge">${L('PERKESO', 'SOCSO')}: ${money(t.socso)}</span>
-        <span class="badge">${L('SIP', 'EIS')}: ${money(t.eis)}</span><span class="badge">PCB: ${money(t.pcb)}</span>
+        <span class="badge">${L('SIP', 'EIS')}: ${money(t.eis)}</span><span class="badge">SKBBK: ${money(t.skbbk)}</span><span class="badge">PCB: ${money(t.pcb)}</span>
       </div>
-      <div style="margin-top:.6rem"><b>${L('Kos buruh ikut lokasi', 'Labour cost by location')}</b> <span class="xs muted">(${L('kasar + caruman majikan', 'gross + employer contributions')})</span>
-        <div class="row" style="margin-top:.3rem">${Object.entries(items.reduce((m, x) => {
-          const k = S.locations.find(l => l.id === (x.branchId || S.workers.find(w => w.id === x.workerId)?.branchId))?.name || L('Tiada lokasi', 'No location');
-          m[k] = (m[k] || 0) + (x.gross || 0) + (x.employerTotal || 0); return m;
-        }, {})).map(([k, v]) => `<span class="badge b-brand">${esc(k)}: ${money(v)}</span>`).join('')}</div></div>
-      ${locked ? `<p class="xs muted" style="margin-top:.5rem">${L('Dikunci pada', 'Locked on')} ${fmtDateTime(run.lockedAt)}. ${L('Slip boleh dilihat oleh pekerja dalam app.', 'Staff can view their slips in the app.')}</p>`
-        : `<p class="xs muted" style="margin-top:.5rem">${L('Semak & sunting setiap pekerja, kemudian tekan "Kunci & Terbit Slip". Tuntutan & pendahuluan akan ditanda dibayar, dan item "sekali sahaja" dibuang dari profil pekerja.', 'Review & edit each staff, then press "Lock & Publish Slips". Claims & advances will be marked paid, and "one-time" items removed from staff profiles.')}</p>`}
+      <p class="xs muted" style="margin-top:.5rem">${S.paySub === 'draft'
+        ? L('Tekan "Butiran & Slip" untuk lihat kiraan automatik & pratonton slip. Pekerja TIDAK nampak draf — slip hanya dihantar selepas diluluskan.', 'Tap "Details & Slip" to see the automatic calculation & slip preview. Staff do NOT see drafts — slips are sent only after approval.')
+        : L('Slip di tab ini sudah dihantar kepada pekerja. "Tarik balik" memadam slip daripada app pekerja & kembalikan ke draf.', 'Slips in this tab have been sent to staff. "Withdraw" removes the slip from the staff app & returns it to draft.')}</p>
     </div>`;
-  $$('[data-pe]').forEach(b => b.onclick = () => editPayItem(period, run.items[b.dataset.pe]));
+  $$('[data-psub]').forEach(b => b.onclick = () => { S.paySub = b.dataset.psub; drawPayrun(); });
   $$('[data-pcal]').forEach(b => b.onclick = () => staffCalendar(S.workers.find(w => w.id === b.dataset.pcal), period));
-  $$('[data-ps]').forEach(b => b.onclick = () => openPrint(payslipHtml(S.company, run.items[b.dataset.ps], period), false) || toast(L('Benarkan pop-up untuk lihat slip.', 'Allow pop-ups to view the slip.'), 'warn'));
-  $('#payPrint').onclick = () => openPrint(payslipHtml(S.company, items, period)) || toast(L('Benarkan pop-up untuk cetak.', 'Allow pop-ups to print.'), 'warn');
-  $('#payXl').onclick = () => payExcel(period, items, t);
-  $('#payBank').onclick = () => bankFile(period, items);
+  $$('[data-pdet]').forEach(b => b.onclick = () => payDetail(period, run.items[b.dataset.pdet]));
+  $$('[data-pap]').forEach(b => b.onclick = (e) => approvePay(period, [b.dataset.pap], e.currentTarget));
+  $$('[data-punap]').forEach(b => b.onclick = (e) => withdrawPay(period, b.dataset.punap, e.currentTarget));
+  $('#selAll') && ($('#selAll').onchange = (e) => $$('[data-sel]').forEach(c => c.checked = e.target.checked));
+  $('#apSel') && ($('#apSel').onclick = (e) => { const ids = $$('[data-sel]').filter(c => c.checked).map(c => c.dataset.sel); if (!ids.length) return toast(L('Pilih sekurang-kurangnya seorang.', 'Select at least one.'), 'warn'); approvePay(period, ids, e.currentTarget); });
+  $('#payBonus') && ($('#payBonus').onclick = () => bonusTool(period, drafts));
+  $('#payXl') && ($('#payXl').onclick = () => payExcel(period, list, t));
+  $('#payBank') && ($('#payBank').onclick = () => bankFile(period, approved));
+  $('#payPrint') && ($('#payPrint').onclick = () => openPrint(payslipHtml(S.company, approved, period)) || toast(L('Benarkan pop-up untuk cetak.', 'Allow pop-ups to print.'), 'warn'));
   $('#regen') && ($('#regen').onclick = async (e) => {
-    if (!await confirmBox(L('Jana semula akan menulis ganti semua suntingan dalam draf ini. Teruskan?', 'Regenerating will overwrite all edits in this draft. Continue?'))) return;
+    if (!await confirmBox(L('Jana semula semua DRAF (suntingan & bonus dalam draf akan ditulis ganti). Slip yang sudah diluluskan tidak disentuh. Teruskan?', 'Regenerate all DRAFTS (edits & bonuses in drafts will be overwritten). Approved slips are untouched. Continue?'))) return;
     generatePayrun(period, e.currentTarget);
   });
-  $('#lockPay') && ($('#lockPay').onclick = (e) => lockPayrun(period, run, e.currentTarget));
-  $('#unlockPay') && ($('#unlockPay').onclick = (e) => unlockPayrun(period, run, e.currentTarget));
+}
+
+// Butiran kiraan automatik + pratonton slip sebelum lulus
+function payDetail(period, x) {
+  if (!x) return;
+  const w = S.workers.find(q => q.id === x.workerId) || {};
+  const P = payrollSettings(S.company), d = x.days || {};
+  const line = (e) => `<tr><td>${esc(e.name)}${e.note ? `<div class="xs muted">${esc(e.note)}</div>` : ''}</td><td class="small">${e.kind === 'basic' || e.kind === 'allow' || e.kind === 'ot' || e.kind === 'bonus' || e.kind === 'other' ? `${e.epf ? 'KWSP ✓' : ''}${e.socso ? ' PERKESO ✓' : ''}` : ''}</td><td class="right">${money(e.amount)}</td></tr>`;
+  const slip = payslipHtml(S.company, [x], period).replace(/<p class="noprint"[\s\S]*?<\/p>/, '');
+  const m = modal({
+    title: `${esc(x.name)} · ${esc(periodLabel(period))}`, wide: true,
+    body: `
+      <div class="row" style="margin-bottom:.6rem">${isAp(x) ? `<span class="badge b-ok">✓ ${L('Diluluskan', 'Approved')}${x.approvedBy ? ' · ' + esc(x.approvedBy) : ''}</span>` : `<span class="badge b-warn">${L('Draf — pekerja belum nampak', 'Draft — not visible to staff')}</span>`}</div>
+      <div class="tabs" style="margin-bottom:.6rem"><button data-dt="calc" class="on">${L('Kiraan', 'Calculation')}</button><button data-dt="slip">${L('Pratonton Slip', 'Slip Preview')}</button></div>
+      <div data-dp="calc">
+        <div class="sec-title" style="margin-top:0">1. ${L('Kehadiran bulan ini', 'Attendance this month')}</div>
+        <div class="row small">
+          <span class="badge">${L('Hadir', 'Present')}: ${d.present ?? 0}</span><span class="badge">${L('Cuti bergaji', 'Paid leave')}: ${d.leavePaid ?? 0}</span>
+          <span class="badge">${L('Tanpa gaji', 'Unpaid')}: ${d.leaveUnpaid ?? 0}</span><span class="badge">${L('Tidak hadir', 'Absent')}: ${d.absent ?? 0}</span>
+          <span class="badge">${L('Lewat', 'Late')}: ${d.lateMin ?? 0}m</span><span class="badge">${L('Jam kerja', 'Hours')}: ${d.workHours ?? 0}</span>
+          <span class="badge">${L('Kadar sehari', 'Daily rate')}: ${money(x.dailyRate)}</span><span class="badge">${L('Kadar sejam', 'Hourly rate')}: ${money(x.hourlyRate)}</span>
+        </div>
+        <div class="sec-title">2. ${L('Pendapatan', 'Earnings')}</div>
+        <div class="table-wrap"><table><tbody>${(x.earnings || []).map(line).join('')}
+          <tr class="bold"><td>${L('Gaji kasar', 'Gross pay')}</td><td></td><td class="right">${money(x.gross)}</td></tr></tbody></table></div>
+        <div class="sec-title">3. ${L('Caruman berkanun', 'Statutory contributions')}</div>
+        <p class="small muted" style="margin:.2rem 0">${P.statMode === 'percent' ? L('Kaedah: peratus manual.', 'Method: manual percentage.') : L('Kaedah: jadual rasmi KWSP/PERKESO/SIP/SKBBK.', 'Method: official EPF/SOCSO/EIS/SKBBK tables.')}
+          ${L('Status', 'Status')}: <b>${esc({ citizen: L('Warganegara', 'Citizen'), pr: 'PR', foreign: L('Asing', 'Foreign') }[w.nationality || 'citizen'])}</b>${w.dob ? ` · ${L('Lahir', 'Born')} ${esc(w.dob)}` : ` · <span style="color:var(--warn)">${L('tarikh lahir tiada', 'no date of birth')}</span>`}${x.statNote ? ' · ' + esc(x.statNote) : ''}</p>
+        <div class="table-wrap"><table><thead><tr><th></th><th class="right">${L('Asas kiraan', 'Base')}</th><th class="right">${L('Pekerja', 'Employee')}</th><th class="right">${L('Majikan', 'Employer')}</th></tr></thead><tbody>
+          ${[['epf', L('KWSP', 'EPF'), x.bases?.epf], ['socso', L('PERKESO', 'SOCSO'), x.bases?.socso], ['eis', L('SIP', 'EIS'), x.bases?.socso], ['skbbk', 'SKBBK', x.bases?.socso]].map(([k, n, b]) => {
+            const ee = (x.deductions || []).filter(q => q.kind === k).reduce((a, q) => a + q.amount, 0);
+            return `<tr><td>${n}</td><td class="right">${b != null ? money(b) : '-'}</td><td class="right">${money(ee)}</td><td class="right">${k === 'skbbk' ? '-' : money(x.employer?.[k] || 0)}</td></tr>`;
+          }).join('')}
+          ${x.employer?.levy ? `<tr><td>${L('Levi HRD', 'HRD levy')}</td><td></td><td class="right">-</td><td class="right">${money(x.employer.levy)}</td></tr>` : ''}
+        </tbody></table></div>
+        <div class="sec-title">4. ${L('Potongan', 'Deductions')}</div>
+        <div class="table-wrap"><table><tbody>${(x.deductions || []).map(e => `<tr><td>${esc(e.name)}${e.note ? `<div class="xs muted">${esc(e.note)}</div>` : ''}</td><td class="right">${money(e.amount)}</td></tr>`).join('') || `<tr><td class="muted">-</td><td></td></tr>`}
+          <tr class="bold"><td>${L('Jumlah potongan', 'Total deductions')}</td><td class="right">${money(x.totalDed)}</td></tr></tbody></table></div>
+        <div class="card" style="background:var(--gold2);border-color:var(--gold);margin-top:.6rem"><div class="row between"><b>${L('GAJI BERSIH', 'NET PAY')}</b><b style="color:var(--gold);font-size:1.25rem">${money(x.net)}</b></div>
+          <div class="xs muted">${money(x.gross)} − ${money(x.totalDed)} · ${L('Kos majikan', 'Employer cost')}: ${money((x.gross || 0) + (x.employerTotal || 0))}</div></div>
+      </div>
+      <div data-dp="slip" class="hide"><iframe id="slipFrame" title="${L('Pratonton slip', 'Slip preview')}" style="width:100%;height:560px;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe></div>`,
+    actions: [
+      { label: L('Tutup', 'Close') },
+      { label: L('Kalendar', 'Calendar'), cls: 'btn-ghost', autoClose: false, onClick: () => { staffCalendar(w, period); return false; } },
+      { label: L('Cetak slip', 'Print slip'), cls: 'btn-ghost', autoClose: false, onClick: () => { openPrint(payslipHtml(S.company, [x], period), false); return false; } },
+      ...(!isAp(x) ? [
+        { label: L('Sunting', 'Edit'), cls: 'btn-soft', onClick: () => { setTimeout(() => editPayItem(period, x), 50); } },
+        { label: L('Lulus & Hantar Slip', 'Approve & Send Slip'), cls: 'btn-ok', onClick: () => { approvePay(period, [x.workerId], null); } }] : [])
+    ]
+  });
+  const el = m.el;
+  $('#slipFrame', el).srcdoc = slip;
+  $$('[data-dt]', el).forEach(b => b.onclick = () => { $$('[data-dt]', el).forEach(q => q.classList.toggle('on', q === b)); $$('[data-dp]', el).forEach(p => p.classList.toggle('hide', p.dataset.dp !== b.dataset.dt)); });
+}
+
+// Lulus & terbitkan slip (seorang atau ramai)
+async function approvePay(period, ids, btn) {
+  const run = S.payRun; if (!run) return;
+  const items = ids.map(id => run.items[id]).filter(x => x && !isAp(x));
+  if (!items.length) return;
+  if (!await confirmBox(L(`Luluskan & hantar slip gaji ${periodLabel(period)} kepada ${items.length} pekerja?`, `Approve & send ${periodLabel(period)} payslips to ${items.length} staff?`), L('Lulus & Hantar', 'Approve & Send'))) return;
+  btn && busy(btn, true);
+  try {
+    const by = S.user.displayName || S.user.email || '';
+    const ops = [];
+    const upd = { updatedAt: serverTimestamp() };
+    items.forEach(it => {
+      const ap = { ...it, status: 'approved', approvedBy: by };
+      upd[`items.${it.workerId}.status`] = 'approved';
+      upd[`items.${it.workerId}.approvedBy`] = by;
+      upd[`items.${it.workerId}.approvedAt`] = serverTimestamp();
+      ops.push(b => b.set(doc(db, 'companies', S.cid, 'payslips', `${period}_${it.workerId}`), { ...ap, period, publishedAt: serverTimestamp() }));
+      (it.advanceIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: period })));
+      if ((it.loanPays || []).length) ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', it.workerId), { loanTx: { [period]: it.loanPays } }, { merge: true }));
+      const w = S.workers.find(q => q.id === it.workerId);
+      if (w && ((w.allowances || []).some(a => a.type === 'once') || (w.deductions || []).some(d => d.type === 'once'))) {
+        ops.push(b => b.update(doc(db, 'companies', S.cid, 'workers', w.id), { allowances: (w.allowances || []).filter(a => a.type !== 'once'), deductions: (w.deductions || []).filter(d => d.type !== 'once') }));
+      }
+    });
+    const remaining = Object.values(run.items).filter(x => !isAp(x) && !ids.includes(x.workerId)).length;
+    upd.status = remaining ? 'draft' : 'locked';
+    if (!remaining) { upd.lockedAt = serverTimestamp(); upd.lockedBy = by; }
+    ops.unshift(b => b.update(doc(db, 'companies', S.cid, 'payruns', period), upd));
+    await commitOps(ops);
+    logAct('payroll.approve', `${period} · ${items.map(x => x.workerId).join(', ')}`);
+    toast(L(`${items.length} slip diluluskan & dihantar kepada pekerja.`, `${items.length} slips approved & sent to staff.`));
+    drawPayrun();
+  } catch (e) { console.error(e); toast(authErr(e), 'bad', 5000); btn && busy(btn, false); }
+}
+
+async function withdrawPay(period, wid, btn) {
+  const it = S.payRun?.items?.[wid]; if (!it) return;
+  if (!await confirmBox(L(`Tarik balik slip ${it.name}? Slip dipadam daripada app pekerja dan kembali ke draf untuk disunting.`, `Withdraw ${it.name}'s slip? It is removed from the staff app and returns to draft for editing.`))) return;
+  busy(btn, true);
+  try {
+    const ops = [
+      b => b.update(doc(db, 'companies', S.cid, 'payruns', period), { [`items.${wid}.status`]: 'draft', [`items.${wid}.approvedBy`]: deleteField(), [`items.${wid}.approvedAt`]: deleteField(), status: 'draft', updatedAt: serverTimestamp() }),
+      b => b.delete(doc(db, 'companies', S.cid, 'payslips', `${period}_${wid}`))
+    ];
+    (it.advanceIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: deleteField() })));
+    if ((it.loanPays || []).length) ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', wid), { loanTx: { [period]: deleteField() } }, { merge: true }));
+    await commitOps(ops);
+    logAct('payroll.withdraw', `${period} · ${wid}`);
+    toast(L('Slip ditarik balik.', 'Slip withdrawn.'));
+    S.paySub = 'draft'; drawPayrun();
+  } catch (e) { toast(authErr(e), 'bad'); busy(btn, false); }
+}
+
+// Bonus / insentif pilihan (tahunan, raya, prestasi…) — ditambah ke draf
+function bonusTool(period, drafts) {
+  const yr = period.slice(0, 4);
+  const basic = (x) => (x.earnings || []).filter(e => e.kind === 'basic').reduce((a, e) => a + e.amount, 0);
+  const m = modal({
+    title: L('Bonus / Insentif', 'Bonus / Incentive'), wide: true,
+    body: `<p class="small muted">${L('Pilihan — isi hanya jika ada bonus bulan ini. Nilai boleh diubah untuk setiap pekerja; kosongkan / 0 = tiada bonus.', 'Optional — fill only if there is a bonus this month. Values can be changed per staff; blank / 0 = no bonus.')}</p>
+      <div class="grid3">
+        <div class="field"><label class="lbl">${L('Nama bonus', 'Bonus name')}</label><input class="input" id="bnN" value="Bonus ${yr}"></div>
+        <div class="field"><label class="lbl">${L('Kaedah', 'Method')}</label><select class="input" id="bnM"><option value="months">${L('Bulan gaji asas (cth: 1.5)', 'Months of basic pay (e.g. 1.5)')}</option><option value="fixed">${L('Amaun tetap (RM)', 'Fixed amount (RM)')}</option></select></div>
+        <div class="field"><label class="lbl">${L('Nilai', 'Value')}</label><input class="input" type="number" step="0.01" min="0" id="bnV" value="1"></div>
+      </div>
+      <label class="check small"><input type="checkbox" id="bnEpf" checked>${L('Dikenakan KWSP (biasanya ya; PERKESO tidak dikenakan atas bonus)', 'Subject to EPF (usually yes; SOCSO does not apply to bonuses)')}</label>
+      <div class="table-wrap" style="max-height:320px;overflow:auto;margin-top:.6rem"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th class="right">${L('Gaji asas', 'Basic')}</th><th class="right">${L('Bonus (RM)', 'Bonus (RM)')}</th></tr></thead><tbody id="bnRows"></tbody></table></div>`,
+    actions: [{ label: L('Batal', 'Cancel') }, { label: L('Tambah ke draf', 'Add to drafts'), cls: 'btn-primary', autoClose: false, onClick: () => { save(); return false; } }]
+  });
+  const el = m.el;
+  const fill = () => {
+    const mode = $('#bnM', el).value, v = Number($('#bnV', el).value || 0);
+    $('#bnRows', el).innerHTML = drafts.map(x => `<tr><td>${esc(x.name)} <span class="xs muted mono">${esc(x.workerId)}</span></td><td class="right">${money(basic(x))}</td>
+      <td class="right"><input class="input" type="number" step="0.01" min="0" data-bn="${esc(x.workerId)}" value="${r2(mode === 'fixed' ? v : basic(x) * v)}" style="max-width:130px;margin-left:auto"></td></tr>`).join('');
+  };
+  $('#bnM', el).onchange = fill; $('#bnV', el).oninput = fill; fill();
+  const save = async () => {
+    const name = $('#bnN', el).value.trim() || 'Bonus', epf = $('#bnEpf', el).checked;
+    const upd = { updatedAt: serverTimestamp() }, items = { ...S.payRun.items };
+    $$('[data-bn]', el).forEach(i => {
+      const x = items[i.dataset.bn]; if (!x || isAp(x)) return;
+      const amt = r2(i.value);
+      const earnings = (x.earnings || []).filter(e => !(e.kind === 'bonus' && e.name === name));
+      if (amt > 0) earnings.push({ name, amount: amt, kind: 'bonus', epf, socso: false, note: '' });
+      const it = totals(applyStatutory({ ...x, earnings }, payrollSettings(S.company), S.workers.find(w => w.id === x.workerId) || {}));
+      items[x.workerId] = it; upd[`items.${x.workerId}`] = it;
+    });
+    upd.totals = payTotals(items);
+    try { await updateDoc(doc(db, 'companies', S.cid, 'payruns', period), upd); logAct('payroll.bonus', `${period} · ${name}`); toast(L('Bonus ditambah ke draf. Caruman dikira semula.', 'Bonus added to drafts. Contributions recalculated.')); m.close(); drawPayrun(); }
+    catch (e) { toast(authErr(e), 'bad'); }
+  };
 }
 
 async function generatePayrun(period, btn) {
@@ -2088,7 +2244,11 @@ async function generatePayrun(period, btn) {
     const withRecs = new Set(recs.map(r => r.workerId));
     const workers = S.workers.filter(w => w.active !== false || withRecs.has(w.id));
     const items = {};
+    // Kekalkan slip yang sudah diluluskan
+    const prev = (await getDoc(doc(db, 'companies', S.cid, 'payruns', period)).catch(() => null))?.data?.();
+    const keep = prev ? Object.fromEntries(Object.entries(prev.items || {}).filter(([, x]) => x.status === 'approved' || prev.status === 'locked')) : {};
     workers.forEach(w => {
+      if (keep[w.id]) { items[w.id] = { ...keep[w.id], status: 'approved' }; return; }
       items[w.id] = computeItem({
         c: S.company, w, period, roster,
         recs: recs.filter(r => r.workerId === w.id),
@@ -2097,7 +2257,7 @@ async function generatePayrun(period, btn) {
       });
     });
     await setDoc(doc(db, 'companies', S.cid, 'payruns', period), {
-      period, status: 'draft', items, totals: payTotals(items), createdAt: serverTimestamp(), updatedAt: serverTimestamp(), by: S.user.email || ''
+      period, status: Object.values(items).every(isAp) ? 'locked' : 'draft', items, totals: payTotals(items), createdAt: serverTimestamp(), updatedAt: serverTimestamp(), by: S.user.email || ''
     });
     logAct('payroll.generate', period);
     toast(L('Draf gaji dijana. Sila semak.', 'Payroll draft generated. Please review.'));
@@ -2169,7 +2329,7 @@ function editPayItem(period, item) {
   const el = m.el;
   const build = () => totals({
     ...item, earnings: readPayLines(el, 'earn'), deductions: readPayLines(el, 'ded2'),
-    employer: { epf: r2($('#erEpf', el).value), socso: r2($('#erSocso', el).value), eis: r2($('#erEis', el).value) }
+    employer: { ...(item.employer || {}), epf: r2($('#erEpf', el).value), socso: r2($('#erSocso', el).value), eis: r2($('#erEis', el).value) }
   });
   const refresh = () => { const it = build(); $('#tG', el).textContent = money(it.gross + it.claims); $('#tD', el).textContent = money(it.totalDed); $('#tN', el).textContent = money(it.net); };
   bindDyn(el);
@@ -2184,50 +2344,6 @@ function editPayItem(period, item) {
     refresh();
   };
   refresh();
-}
-
-async function lockPayrun(period, run, btn) {
-  const items = Object.values(run.items || {});
-  if (!await confirmBox(L(`Kunci gaji ${periodLabel(period)} dan terbitkan ${items.length} slip kepada pekerja?`, `Lock ${periodLabel(period)} payroll and publish ${items.length} slips to staff?`))) return;
-  busy(btn, true);
-  try {
-    const ops = [];
-    ops.push(b => b.update(doc(db, 'companies', S.cid, 'payruns', period), { status: 'locked', lockedAt: serverTimestamp(), lockedBy: S.user.email || '' }));
-    items.forEach(it => {
-      ops.push(b => b.set(doc(db, 'companies', S.cid, 'payslips', `${period}_${it.workerId}`), { ...it, period, publishedAt: serverTimestamp() }));
-      (it.claimIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: period })));
-      (it.advanceIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: period })));
-      if ((it.loanPays || []).length) ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', it.workerId), { loanTx: { [period]: it.loanPays } }, { merge: true }));
-      const w = S.workers.find(x => x.id === it.workerId);
-      if (w && ((w.allowances || []).some(a => a.type === 'once') || (w.deductions || []).some(d => d.type === 'once'))) {
-        ops.push(b => b.update(doc(db, 'companies', S.cid, 'workers', w.id), {
-          allowances: (w.allowances || []).filter(a => a.type !== 'once'),
-          deductions: (w.deductions || []).filter(d => d.type !== 'once')
-        }));
-      }
-    });
-    await commitOps(ops);
-    logAct('payroll.lock', period);
-    toast(L('Gaji dikunci & slip diterbitkan.', 'Payroll locked & slips published.'));
-    drawPayrun();
-  } catch (e) { console.error(e); toast(authErr(e), 'bad', 5000); busy(btn, false); }
-}
-
-async function unlockPayrun(period, run, btn) {
-  if (!await confirmBox(L('Buka kunci? Slip akan ditarik balik daripada pekerja, dan tuntutan/pendahuluan ditanda belum dibayar. Item "sekali sahaja" yang telah dibuang dari profil tidak dikembalikan (masih ada dalam draf ini).', 'Unlock? Slips will be withdrawn from staff, and claims/advances marked unpaid. "One-time" items removed from profiles are not restored (they remain in this draft).'))) return;
-  busy(btn, true);
-  try {
-    const ops = [b => b.update(doc(db, 'companies', S.cid, 'payruns', period), { status: 'draft', unlockedAt: serverTimestamp() })];
-    Object.values(run.items || {}).forEach(it => {
-      ops.push(b => b.delete(doc(db, 'companies', S.cid, 'payslips', `${period}_${it.workerId}`)));
-      [...(it.claimIds || []), ...(it.advanceIds || [])].forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: deleteField() })));
-      if ((it.loanPays || []).length) ops.push(b => b.set(doc(db, 'companies', S.cid, 'hr', it.workerId), { loanTx: { [period]: deleteField() } }, { merge: true }));
-    });
-    await commitOps(ops);
-    logAct('payroll.unlock', period);
-    toast(L('Kunci dibuka.', 'Unlocked.'));
-    drawPayrun();
-  } catch (e) { toast(authErr(e), 'bad'); busy(btn, false); }
 }
 
 function payExcel(period, items, t) {

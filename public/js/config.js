@@ -30,4 +30,4 @@ export const SDK = "10.12.2";
 export const VAPID_KEY = "BKhLhZl6oEhxwII8FmLcy262N2JRpJYuHRj3CBekzWyJAd3-iWxbpODwxVb9Kz-SK51MpRVL5jp4D3oAp68Uk8Y";
 
 // Versi aplikasi (dipaparkan di bawah menu — untuk pastikan deploy terkini)
-export const APP_VERSION = "2026.11.21-c";
+export const APP_VERSION = "2026.11.21-d";
