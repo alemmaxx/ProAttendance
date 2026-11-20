@@ -1,6 +1,7 @@
 // ProAttendance — Halaman Pekerja
 import { auth, db, workerEmail, call } from './fb.js';
 import { APP_VERSION } from './config.js';
+import { manualModal } from './manual.js';
 import {
   signInWithEmailAndPassword, signInWithCustomToken, onAuthStateChanged, signOut, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
@@ -336,6 +337,7 @@ function renderShell() {
     <button data-tab="profil">${icon('user', 22)}<span>${L('Profil', 'Profile')}</span></button>
   </nav>`;
   $$('.bnav button').forEach(b => b.onclick = () => go(b.dataset.tab));
+  if (!$('#helpFab')) { const f = document.createElement('button'); f.id = 'helpFab'; f.className = 'help-fab'; f.type = 'button'; f.setAttribute('aria-label', 'Manual'); f.textContent = '?'; f.onclick = () => manualModal('worker', ({ home: 1, rekod: 2, mohon: 4, berita: 6, profil: 6 })[S.tab] ?? 0); document.body.appendChild(f); }
   go(S.tab);
   setTimeout(offerPasskey, 1500);
 }
@@ -1591,7 +1593,7 @@ function viewProfil() {
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
     <button class="btn btn-ghost btn-block hide" id="pushB">${icon('bell', 18)} ${L('Hidupkan notifikasi', 'Turn on notifications')}</button>
     ${installBtn('btn btn-soft btn-block')}
-    <a class="btn btn-ghost btn-block" href="/panduan.html#s1" target="_blank">${icon('doc', 18)} ${L('Panduan', 'Help')}</a>
+    <button class="btn btn-ghost btn-block" id="manBtn">📘 ${L('Manual Pengguna', 'User Manual')}</button>
     ${pkSupported() ? `<button class="btn btn-ghost btn-block" id="pkBtn">${icon('finger', 18)} ${pkHas() ? L('Cap jari / Face ID: AKTIF (tekan untuk buang)', 'Fingerprint / Face ID: ON (tap to remove)') : L('Aktifkan Cap Jari / Face ID', 'Enable Fingerprint / Face ID')}</button>` : ''}
     <button class="btn btn-ghost btn-block" id="chPin">${icon('shield', 18)} ${L('Tukar PIN', 'Change PIN')}</button>
     <button class="btn btn-ghost btn-block" id="langB">${L('Bahasa: Bahasa Melayu', 'Language: English')}</button>
@@ -1599,6 +1601,7 @@ function viewProfil() {
   </div>
   <p class="center xs muted" style="margin-top:1rem">ProAttendance · v${APP_VERSION}</p>`;
   $('#chPin').onclick = () => pinModal(false);
+  $('#manBtn').onclick = () => manualModal('worker', 0);
   if ($('#pkBtn') && !pkHas()) pkPrep('reg');
   $('#pkBtn') && ($('#pkBtn').onclick = async (e) => {
     if (pkHas()) {

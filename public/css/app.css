@@ -302,3 +302,15 @@ td .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;cursor:poin
 .jpt{display:grid;grid-template-columns:64px 1fr 1fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
 .jpt-n{font-size:.75rem;color:var(--muted);font-weight:700}
 @media(max-width:560px){.jpt{grid-template-columns:1fr auto auto}.jpt-n,.jpt [data-pn]{grid-column:1/-1}}
+
+/* Manual pengguna (pop-up, gaya ProSewa) */
+.manual details{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.manual summary{cursor:pointer;font-weight:700;list-style:none;display:flex;justify-content:space-between;gap:8px}
+.manual summary::-webkit-details-marker{display:none}
+.manual summary::after{content:"+";color:var(--gold);font-size:20px;line-height:1}
+.manual details[open] summary::after{content:"–"}
+.manual ol,.manual ul{margin:8px 0 0;padding-left:20px;line-height:1.65;font-size:14px}
+.manual ul ul{margin-top:4px}
+.manual p{margin:8px 0 0;font-size:14px}
+.help-fab{position:fixed;right:16px;bottom:16px;z-index:45;width:46px;height:46px;border-radius:50%;border:1px solid var(--gold);background:var(--gold2);color:var(--gold);font:800 20px var(--f);cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+@media(max-width:860px){.help-fab{bottom:84px}}

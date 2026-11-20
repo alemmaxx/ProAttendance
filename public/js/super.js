@@ -1,6 +1,7 @@
 // ProAttendance — Super Admin (pemilik sistem)
 import { auth, db } from './fb.js';
 import { APP_VERSION } from './config.js';
+import { manualModal } from './manual.js';
 import {
   signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
@@ -87,7 +88,7 @@ function renderShell() {
     <aside class="side" id="side">
       <div class="side-brand"><img class="logo" src="/icon.svg" alt="ProAttendance" style="background:none;border:0;padding:0"><div><div class="nm">ProAttendance</div><div class="xs" style="opacity:.7">Super Admin</div></div></div>
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span>${t}</span></button>`).join('')}</nav>
-      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>${installBtn('btn btn-sm btn-soft btn-block')}
+      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div><button class="btn btn-sm btn-ghost btn-block" id="manBtn" style="margin:.3rem 0">📘 ${L('Manual', 'Manual')}</button>${installBtn('btn btn-sm btn-soft btn-block')}
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${L('Keluar', 'Logout')}</button></div></div>
     </aside>
     <div class="side-bg" id="sideBg"></div>
@@ -102,6 +103,7 @@ function renderShell() {
   $('#sideBg').onclick = () => { $('#side').classList.remove('open'); $('#sideBg').classList.remove('open'); };
   $('#lo').onclick = () => signOut(auth);
   go(S.view);
+  $('#manBtn') && ($('#manBtn').onclick = () => manualModal('super', 0));
 }
 document.addEventListener('langchange', () => { if (S.user && $('.shell')) renderShell(); else if ($('.login-wrap')) keepInputs(renderLogin); });
 

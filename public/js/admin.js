@@ -1,6 +1,7 @@
 // ProAttendance — Halaman Admin Syarikat
 import { auth, db, call, workerEmail, FIREBASE_CONFIG } from './fb.js';
 import { APP_VERSION } from './config.js';
+import { manualModal, manualFirstTime, ADMIN_TOPIC } from './manual.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut,
@@ -325,7 +326,7 @@ function renderShell() {
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
         <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
-        <a class="btn btn-sm btn-ghost btn-block" href="/panduan.html" target="_blank">${icon('doc', 14)} ${L('Panduan Pengguna', 'User Guide')}</a>
+        <button class="btn btn-sm btn-ghost btn-block" id="manBtn">📘 ${L('Manual Pengguna', 'User Manual')}</button>
         ${installBtn('btn btn-sm btn-soft btn-block')}
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 16)} ${L('Keluar', 'Logout')}</button></div>
       </div>
@@ -345,6 +346,9 @@ function renderShell() {
   $('#sideBg').onclick = closeSide;
   $('#lo').onclick = async () => { if (await confirmBox(L('Log keluar sekarang?', 'Log out now?'))) signOut(auth); };
   updateBrandBits();
+  $('#manBtn') && ($('#manBtn').onclick = () => manualModal('admin', ADMIN_TOPIC[S.view] ?? 0));
+  if (!$('#helpFab')) { const f = document.createElement('button'); f.id = 'helpFab'; f.className = 'help-fab'; f.type = 'button'; f.title = 'Manual'; f.setAttribute('aria-label', 'Manual'); f.textContent = '?'; f.onclick = () => manualModal('admin', ADMIN_TOPIC[S.view] ?? 0); document.body.appendChild(f); }
+  if (!S.me?.support) manualFirstTime('admin');
   updatePendingBadge();
   if (!NAV().some(n => n[0] === S.view)) S.view = 'dashboard';
   go(S.view);
