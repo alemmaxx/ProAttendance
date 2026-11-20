@@ -432,6 +432,15 @@ function pickLocation(pos) {
 
 async function punch(type, btn) {
   if (isExpired(S.company)) return toast(L('Sistem tergendala. Sila rujuk majikan anda.', 'System unavailable.'), 'bad');
+  // Pengesahan sebelum masuk / keluar kerja
+  if (type === 'in' || type === 'out') {
+    const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const ok = await confirmBox(type === 'in'
+      ? L(`Mula kerja sekarang (${now})?`, `Start work now (${now})?`)
+      : L(`Tamat kerja sekarang (${now})? Pastikan kerja hari ini sudah selesai.`, `End work now (${now})? Make sure today's work is done.`),
+      type === 'in' ? L('Ya, Mula Kerja', 'Yes, Start Work') : L('Ya, Tamat Kerja', 'Yes, End Work'));
+    if (!ok) return;
+  }
   busy(btn, true);
   try {
     let pos = null;
