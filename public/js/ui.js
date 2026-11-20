@@ -471,8 +471,8 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 
 
 // ---------------------------------------------------------------- INSTALL APP (PWA — tanpa APK)
-let _dip = null;
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); _dip = e; });
+let _dip = window.__pwaPrompt || null;   // ditangkap awal dalam <head>
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); _dip = e; window.__pwaPrompt = e; });
 window.addEventListener('appinstalled', () => { _dip = null; $$('[data-install]').forEach(b => b.remove()); toast(L('App berjaya di-install.', 'App installed.')); });
 export const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -483,6 +483,7 @@ export function installBtn(cls = 'btn btn-ghost btn-sm') {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-install]'); if (!b) return;
   e.preventDefault();
+  _dip = _dip || window.__pwaPrompt || null;
   if (_dip) {
     _dip.prompt();
     try { const r = await _dip.userChoice; if (r.outcome === 'accepted') { _dip = null; b.remove(); } } catch {}
@@ -497,7 +498,8 @@ document.addEventListener('click', async (e) => {
              L('Kemudian tekan <b>Kongsi</b> → <b>Add to Home Screen</b>.', 'Then tap <b>Share</b> → <b>Add to Home Screen</b>.')])
     : [L('Tekan menu <b>⋮</b> (penjuru kanan atas Chrome).', 'Tap the <b>⋮</b> menu (top-right in Chrome).'),
        L('Pilih <b>Install app</b> atau <b>Add to Home screen</b>.', 'Choose <b>Install app</b> or <b>Add to Home screen</b>.'),
-       L('Di komputer: tekan ikon install (⊕) di hujung kanan bar alamat.', 'On a computer: click the install icon (⊕) at the right end of the address bar.')];
+       L('Di komputer: tekan ikon install (⊕) di hujung kanan bar alamat.', 'On a computer: click the install icon (⊕) at the right end of the address bar.'),
+       L('Tiada pilihan install? App mungkin <b>sudah di-install</b> — cari "ProAttendance" dalam senarai app / buka <b>chrome://apps</b>. Buang app lama dahulu jika mahu ikon baharu.', 'No install option? The app may be <b>already installed</b> — look for "ProAttendance" in your apps / open <b>chrome://apps</b>. Remove the old app first if you want the new icon.')];
   modal({
     title: L('Install App', 'Install App'),
     body: `<p class="small muted">${L('Tiada muat turun APK diperlukan — app dipasang terus dari laman ini, buka skrin penuh seperti app biasa.', 'No APK download needed — the app installs straight from this page and opens full-screen like a normal app.')}</p>
