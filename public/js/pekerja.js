@@ -42,7 +42,7 @@ function renderLogin() {
     <form class="login-card" id="loginForm" autocomplete="on">
       <div class="row between" style="margin-bottom:.6rem"><span></span>${langBtn()}</div>
       <div class="login-brand">
-        <div id="brandLogo">${b ? logoHtml(b, 'logo-lg') : `<span class="logo-lg logo-ini">${icon('clock', 38)}</span>`}</div>
+        <div id="brandLogo">${b ? logoHtml(b, 'logo-lg') : `<img class="logo-lg" src="/icon.svg" alt="ProAttendance" style="background:none;border:0;padding:0">`}</div>
         <h2 id="brandName">${b ? esc(b.name) : L('Kehadiran Pekerja', 'Staff Attendance')}</h2>
         <p class="muted small" data-ms="Log masuk dengan ID pekerja anda" data-en="Log in with your staff ID"></p>
       </div>

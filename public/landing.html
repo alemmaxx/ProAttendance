@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ProAttendance — Sistem Kehadiran & Gaji Pekerja</title>
   <meta name="description" content="Sistem kehadiran pekerja online: punch guna telefon (GPS, QR, selfie), cuti & OT online, gaji & slip gaji automatik. Cuba percuma.">
-  <meta name="theme-color" content="#0a1210">
+  <meta name="theme-color" content="#111827">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
@@ -68,7 +69,7 @@
       ];
       $('#app').innerHTML = `
       <section class="hero">
-        <div class="nav"><b>${icon('clock', 26)} ProAttendance</b><div class="row">${langBtn()}<a class="btn btn-sm btn-ghost" href="/admin.html">${L('Log Masuk', 'Log In')}</a></div></div>
+        <div class="nav"><b style="display:flex;align-items:center;gap:10px"><img src="/icon.svg" alt="" width="30" height="30"> ProAttendance</b><div class="row">${langBtn()}<a class="btn btn-sm btn-ghost" href="/admin.html">${L('Log Masuk', 'Log In')}</a></div></div>
         <div class="tag">✦ ${L('Kehadiran · Cuti · OT · Gaji', 'Attendance · Leave · OT · Payroll')}</div>
         <h1 class="gold-h">${L('Kehadiran pekerja, terus dari telefon.', 'Staff attendance, right from the phone.')}</h1>
         <p>${L('Tiada lagi buku log dan "punch kan kawan". Pekerja punch dengan GPS, QR atau selfie; anda nampak semuanya secara langsung dan gaji dikira sendiri.', 'No more logbooks or buddy punching. Staff punch with GPS, QR or selfie; you see everything live and payroll calculates itself.')}</p>

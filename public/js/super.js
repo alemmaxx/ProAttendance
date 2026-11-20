@@ -21,7 +21,7 @@ function renderLogin() {
   <div class="login-wrap">
     <form class="login-card" id="lf">
       <div class="row between"><span class="badge">Super Admin</span>${langBtn()}</div>
-      <div class="login-brand" style="margin-top:.6rem"><span class="logo-lg logo-ini">${icon('shield', 38)}</span><h2>ProAttendance</h2></div>
+      <div class="login-brand" style="margin-top:.6rem"><img class="logo-lg" src="/icon.svg" alt="ProAttendance" style="background:none;border:0;padding:0"><h2>ProAttendance</h2></div>
       <div class="field"><label class="lbl">${L('E-mel', 'Email')}</label><input class="input" type="email" id="em" required></div>
       <div class="field"><label class="lbl">${L('Kata laluan', 'Password')}</label><div class="pw"><input class="input" type="password" id="pw" required><button type="button" data-eye>${icon('eye', 18)}</button></div></div>
       <button class="btn btn-primary btn-block" id="lb">${L('Log Masuk', 'Log In')}</button>
@@ -85,7 +85,7 @@ function renderShell() {
   app.innerHTML = `
   <div class="shell">
     <aside class="side" id="side">
-      <div class="side-brand"><span class="logo logo-ini">${icon('shield', 22)}</span><div><div class="nm">ProAttendance</div><div class="xs" style="opacity:.7">Super Admin</div></div></div>
+      <div class="side-brand"><img class="logo" src="/icon.svg" alt="ProAttendance" style="background:none;border:0;padding:0"><div><div class="nm">ProAttendance</div><div class="xs" style="opacity:.7">Super Admin</div></div></div>
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span>${t}</span></button>`).join('')}</nav>
       <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>${installBtn('btn btn-sm btn-soft btn-block')}
         <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${L('Keluar', 'Logout')}</button></div></div>

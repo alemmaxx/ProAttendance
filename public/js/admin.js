@@ -74,7 +74,7 @@ function renderAuth(mode = 'login') {
     <form class="login-card" id="af">
       <div class="row between" style="margin-bottom:.4rem"><span class="badge b-brand">${L('Admin', 'Admin')}</span>${langBtn()}</div>
       <div class="login-brand">
-        <span class="logo-lg logo-ini">${icon('building', 38)}</span>
+        <img class="logo-lg" src="/icon.svg" alt="ProAttendance" style="background:none;border:0;padding:0">
         <h2>${titles[mode]}</h2>
         <p class="muted small">${mode === 'register'
           ? L('Daftar dan cuba percuma. Isi butiran syarikat selepas ini.', 'Sign up and try it free. Fill in company details next.')
