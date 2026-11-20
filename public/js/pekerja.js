@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword, signInWithCustomToken, onAuthStateChanged, signOut, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
+  doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch, deleteField
 } from './fs.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, installBtn, todayStr, addDays, fmtTime, fmtDate, toDate, minsToHM, dayName,
@@ -268,7 +268,7 @@ function pinModal(force) {
           try {
             await updatePassword(auth.currentUser, a);
             if (S.worker.mustChangePin) {
-              await updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), { mustChangePin: false });
+              await updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), { mustChangePin: false, tempPin: deleteField() });
               S.worker.mustChangePin = false;
             }
             toast(L('PIN berjaya ditukar.', 'PIN changed.'));

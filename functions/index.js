@@ -43,7 +43,7 @@ exports.pa_resetWorkerPin = onCall({ region: REGION }, async (req) => {
   if (!/^\d{6}$/.test(pin)) throw new HttpsError('invalid-argument', 'PIN mesti 6 digit.');
   const w = await getWorker(me.cid, req.data?.workerId);
   await getAuth().updateUser(w.data.uid, { password: pin });
-  await w.ref.update({ mustChangePin: true, pinResetAt: FieldValue.serverTimestamp() });
+  await w.ref.update({ mustChangePin: true, tempPin: pin, pinResetAt: FieldValue.serverTimestamp() });
   return { ok: true };
 });
 

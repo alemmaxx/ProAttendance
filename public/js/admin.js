@@ -643,11 +643,13 @@ function renderWorkerList() {
         ${w.mustChangePin ? `<div class="xs muted">${L('Belum log masuk', 'Not logged in yet')}</div>` : ''}</td>
       <td class="right" style="white-space:nowrap">
         ${w.phone ? `<a class="btn btn-sm btn-ghost" title="WhatsApp" target="_blank" rel="noopener" href="https://wa.me/${String(w.phone).replace(/\D/g, '').replace(/^0/, '60')}">${icon('chat', 16)}</a>` : ''}
+        ${w.active !== false ? `<button class="btn btn-sm btn-soft" data-cp="${esc(w.id)}" title="${L('Salin ID & PIN untuk dihantar kepada pekerja', 'Copy ID & PIN to send to the staff member')}">${icon('copy', 16)} ${L('Salin log masuk', 'Copy login')}</button>` : ''}
         <button class="btn btn-sm btn-ghost" data-ed="${esc(w.id)}">${L('Sunting', 'Edit')}</button>
         <button class="btn btn-sm btn-ghost" data-more="${esc(w.id)}">⋯</button>
       </td></tr>`).join('')}</tbody></table></div>
     <p class="xs muted" style="margin-top:.6rem">${list.length} / ${S.workers.length} ${L('pekerja', 'staff')}</p>`;
   $$('[data-ed]', box).forEach(b => b.onclick = () => workerForm(S.workers.find(w => w.id === b.dataset.ed)));
+  $$('[data-cp]', box).forEach(b => b.onclick = (e) => copyLogin(S.workers.find(w => w.id === b.dataset.cp), e.currentTarget));
   $$('[data-more]', box).forEach(b => b.onclick = () => workerMenu(S.workers.find(w => w.id === b.dataset.more)));
 }
 
@@ -805,7 +807,7 @@ async function saveWorker(el, w) {
     await signOut(sa).catch(() => {});
     const b = writeBatch(db);
     b.set(doc(db, 'users', uid), { role: 'worker', cid: S.cid, workerId: wid, createdAt: serverTimestamp() });
-    b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...data, uid, active: true, mustChangePin: true, deviceId: null, createdAt: serverTimestamp() });
+    b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...data, uid, active: true, mustChangePin: true, tempPin: pin, deviceId: null, createdAt: serverTimestamp() });
     b.update(cRef(), { workerCount: increment(1) });
     await b.commitFull();
     logAct('worker.create', `${wid} ${data.name}`);
@@ -835,6 +837,26 @@ Your ${S.company.name} attendance account is ready.
 🔑 Temporary PIN: ${pin}
 
 Please log in and change your PIN. You can "Add to Home Screen" to use it like an app.`);
+}
+
+// Salin maklumat log masuk untuk ditampal dalam chat pekerja.
+// PIN sementara disimpan sehingga pekerja menukarnya; selepas itu PIN sementara baharu dijana.
+async function copyLogin(w, btn) {
+  if (!w) return;
+  if (w.mustChangePin && w.tempPin) {
+    copyText(loginText(w.id, w.tempPin, w.name));
+    return toast(L('Disalin — tampal dalam chat pekerja.', 'Copied — paste it in the staff chat.'));
+  }
+  if (!await confirmBox(L(`${w.name} sudah menukar PIN sendiri, jadi PIN itu tidak diketahui sistem. Jana PIN sementara baharu dan salin? (PIN lama tidak sah lagi)`, `${w.name} has already set their own PIN, so the system doesn't know it. Generate a new temporary PIN and copy? (The old PIN stops working)`), L('Jana & Salin', 'Generate & Copy'))) return;
+  const pin = randPin();
+  busy(btn, true);
+  try {
+    await call('pa_resetWorkerPin', { workerId: w.id, pin });
+    logAct('worker.resetPin', w.id);
+    copyText(loginText(w.id, pin, w.name));
+    toast(L('PIN baharu disalin — tampal dalam chat pekerja.', 'New PIN copied — paste it in the staff chat.'));
+  } catch (err) { toast(authErr(err), 'bad'); }
+  finally { busy(btn, false); }
 }
 
 function showLogin(wid, pin, name, phone, isNew) {
@@ -3315,7 +3337,7 @@ function importWorkers() {
           await signOut(sa).catch(() => {});
           const b = writeBatch(db);
           b.set(doc(db, 'users', cred.user.uid), { role: 'worker', cid: S.cid, workerId: wid, createdAt: serverTimestamp() });
-          b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...d, uid: cred.user.uid, active: true, mustChangePin: true, deviceId: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+          b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...d, uid: cred.user.uid, active: true, mustChangePin: true, tempPin: pin, deviceId: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
           b.update(cRef(), { workerCount: increment(1) });
           await b.commitFull();
           out.push({ wid, pin, name: d.name, phone: d.phone, ok: true });

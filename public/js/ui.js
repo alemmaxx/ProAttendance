@@ -429,6 +429,7 @@ export function authErr(e) {
 // ---------- Ikon (SVG) ----------
 const P = {
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1"/>',
   finger: '<path d="M12 11v3a8 8 0 01-1.5 4.7"/><path d="M8.5 10.5a3.5 3.5 0 017 .5v2.5a12 12 0 01-.9 4.5"/><path d="M5.5 13.5V11a6.5 6.5 0 0113 0v1.5"/><path d="M3 9.5a9.5 9.5 0 0118 0"/><path d="M18.5 15.5a15 15 0 01-.8 3.5"/>',
   users: '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M16 4a4 4 0 010 8"/><path d="M22 21c0-3-2-5-4-6"/>',
   pin: '<path d="M12 22s7-7 7-12a7 7 0 10-14 0c0 5 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/>',
