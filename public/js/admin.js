@@ -667,7 +667,7 @@ function allowRow(a = {}, finance = false) {
 }
 function dedRow(a = {}) {
   return `<div class="dyn-row ded" data-row="ded">
-    <input class="input" data-k="name" placeholder="${L('Nama potongan', 'Deduction name')}" value="${esc(a.name || '')}">
+    <input class="input" data-k="name" list="dedList" placeholder="${L('Nama potongan', 'Deduction name')}" value="${esc(a.name || '')}">
     <input class="input" data-k="amount" type="number" step="0.01" min="0" placeholder="RM" value="${a.amount ?? ''}">
     <select class="input" data-k="type">${opts(DED_TYPES(), a.type || 'monthly')}</select>
     <button type="button" class="icon-btn" data-del>✕</button>
@@ -720,6 +720,8 @@ function workerForm(w) {
         <div class="field"><label class="lbl">${L('No. KWSP', 'EPF no.')}</label><input class="input" name="epfNo" value="${esc(w.epfNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. PERKESO', 'SOCSO no.')}</label><input class="input" name="socsoNo" value="${esc(w.socsoNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. cukai (LHDN)', 'Tax no. (LHDN)')}</label><input class="input" name="taxNo" value="${esc(w.taxNo || '')}"></div>
+        <div class="field"><label class="lbl">${L('No. Tabung Haji (pilihan)', 'Tabung Haji no. (optional)')}</label><input class="input" name="thNo" value="${esc(w.thNo || '')}"></div>
+        <div class="field"><label class="lbl">${L('No. ASB (pilihan)', 'ASB no. (optional)')}</label><input class="input" name="asbNo" value="${esc(w.asbNo || '')}"></div>
         <div class="field"><label class="lbl">${L('Status (untuk caruman)', 'Status (for contributions)')}</label><select class="input" name="nationality">${opts([['citizen', L('Warganegara', 'Citizen')], ['pr', L('Pemastautin Tetap (PR)', 'Permanent Resident (PR)')], ['foreign', L('Pekerja asing', 'Foreign worker')]], w.nationality || 'citizen')}</select></div>
         <label class="check small"><input type="checkbox" name="socsoCat2" ${w.socsoCat2 ? 'checked' : ''}>${L('PERKESO Kategori 2 (mula mencarum pada umur 55+)', 'SOCSO Category 2 (first contributed at age 55+)')}</label>
         <label class="check small"><input type="checkbox" name="skbbkOut" ${w.skbbk === false ? 'checked' : ''}>${L('Tarik diri SKBBK / Lindung 24 Jam (warganegara sahaja)', 'Opted out of SKBBK / Lindung 24 Jam (locals only)')}</label>
@@ -743,6 +745,7 @@ function workerForm(w) {
       <p class="xs muted">${L('Kosongkan untuk guna nilai lalai syarikat.', 'Leave blank to use the company default.')}</p>
       <div class="sec-title">${L('Elaun', 'Allowances')}</div>
       <p class="xs muted" style="margin-top:-.3rem">${L('KWSP / PERKESO untuk setiap elaun ditetapkan oleh finance di Gaji → Tetapan Kewangan.', 'EPF / SOCSO for each allowance is set by finance in Payroll → Finance Settings.')}</p>
+      <datalist id="dedList">${['Zakat', 'Tabung Haji', 'ASB', L('Pinjaman', 'Loan'), L('Peribadi', 'Personal'), L('Cukai Pendapatan', 'Income Tax')].map(x => `<option value="${esc(x)}">`).join('')}</datalist>
       <datalist id="allowList">${tpls.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
       <div id="allowBox">${(w.allowances || []).map(allowRow).join('')}</div>
       <div class="row">
@@ -778,6 +781,7 @@ async function saveWorker(el, w) {
     position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, startDate: fd.startDate || '',
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
+    thNo: (fd.thNo || '').trim(), asbNo: (fd.asbNo || '').trim(),
     nationality: fd.nationality || 'citizen', socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
     allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp(),
     defaultShift: fd.defaultShift || '',
@@ -1255,9 +1259,15 @@ function viewSettings() {
       <div class="field"><label class="lbl">${L('No. pendaftaran (SSM)', 'Registration no. (SSM)')}</label><input class="input" id="sSsm" value="${esc(c.ssm || '')}"></div>
       <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')}</label><input class="input" id="sPhone" inputmode="tel" value="${esc(c.phone || '')}"></div>
       <div class="field"><label class="lbl">${L('E-mel syarikat', 'Company email')}</label><input class="input" id="sEmail" type="email" value="${esc(c.email || c.ownerEmail || '')}"></div>
+      <div class="field"><label class="lbl">${L('No. faks (pilihan)', 'Fax no. (optional)')}</label><input class="input" id="sFax" inputmode="tel" value="${esc(c.fax || '')}"></div>
       <div class="field"><label class="lbl">${L('Warna tema', 'Theme colour')}</label><input class="input" type="color" id="sColor" value="${esc(c.color && c.color.toLowerCase() !== '#1d4ed8' ? c.color : '#d9b44a')}" style="height:46px;padding:.2rem"></div>
     </div>
     <div class="field"><label class="lbl">${L('Alamat', 'Address')}</label><textarea class="input" id="sAddr" style="min-height:70px">${esc(c.address || '')}</textarea></div>
+    <div class="field"><label class="lbl">${L('Cop syarikat (untuk slip gaji, pilihan)', 'Company stamp (for payslips, optional)')}</label>
+      <div class="row"><span id="stampPrev">${c.stamp ? `<img src="${c.stamp}" alt="" style="height:64px;border-radius:8px;background:#fff;padding:4px">` : `<span class="small muted">${L('Tiada cop', 'No stamp')}</span>`}</span>
+        <label class="btn btn-sm btn-soft" style="margin:0">${icon('plus', 16)} ${L('Muat naik cop', 'Upload stamp')}<input type="file" accept="image/*" id="stampF" hidden></label>
+        ${c.stamp ? `<button class="btn btn-sm btn-ghost" id="stampX" type="button">${L('Buang', 'Remove')}</button>` : ''}</div>
+      <div class="xs muted">${L('Gunakan gambar cop berlatar putih / lutsinar (PNG).', 'Use a stamp image with a white / transparent background (PNG).')}</div></div>
     <button class="btn btn-primary" id="saveProf">${L('Simpan Profil', 'Save Profile')}</button>
   </div>
 
@@ -1377,6 +1387,16 @@ function viewSettings() {
     } catch { toast(L('Gagal membaca imej.', 'Failed to read image.'), 'bad'); }
   };
   $('#logoX') && ($('#logoX').onclick = () => { logo = ''; $('#logoPrev').innerHTML = logoHtml({ ...c, logo: '' }, 'logo-lg'); });
+  let stamp = c.stamp || '';
+  $('#stampF').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      stamp = await fileToDataURL(f, 260, 'image/png');
+      if (stamp.length > 180000) stamp = await fileToDataURL(f, 200, 'image/jpeg', 0.85);
+      $('#stampPrev').innerHTML = `<img src="${stamp}" alt="" style="height:64px;border-radius:8px;background:#fff;padding:4px">`;
+    } catch { toast(L('Gagal membaca imej.', 'Failed to read image.'), 'bad'); }
+  };
+  $('#stampX') && ($('#stampX').onclick = () => { stamp = ''; $('#stampPrev').innerHTML = `<span class="small muted">${L('Cop akan dibuang selepas Simpan.', 'Stamp will be removed after Save.')}</span>`; });
   $('#saveProf').onclick = async (e) => {
     const name = $('#sName').value.trim();
     if (!name) return toast(L('Nama syarikat diperlukan.', 'Company name required.'), 'warn');
@@ -1384,7 +1404,7 @@ function viewSettings() {
     busy(e.currentTarget, true);
     try {
       const b = writeBatch(db);
-      b.update(cRef(), { name, logo, color, ssm: $('#sSsm').value.trim(), phone: $('#sPhone').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim() });
+      b.update(cRef(), { name, logo, color, stamp, ssm: $('#sSsm').value.trim(), phone: $('#sPhone').value.trim(), fax: $('#sFax').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim() });
       b.update(doc(db, 'companyCodes', c.code), { name, logo, color });
       await b.commit();
       logAct('settings.profile', name);
@@ -2271,6 +2291,16 @@ function drawPaySettings() {
     <div class="set-row"><span>${L('OT dikira untuk PERKESO / SIP', 'OT counts for SOCSO / EIS')}</span><label class="switch"><input type="checkbox" id="pOtSo" ${P.otInSocso ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><div><span>${L('Elaun lain (tiada dalam senarai elaun) dikira untuk KWSP', 'Other allowances (not in the list) count for EPF')}</span></div><label class="switch"><input type="checkbox" id="pOaEpf" ${P.otherAllowEpf ? 'checked' : ''}><span></span></label></div>
     <div class="set-row"><div><span>${L('Elaun lain dikira untuk PERKESO / SIP', 'Other allowances count for SOCSO / EIS')}</span></div><label class="switch"><input type="checkbox" id="pOaSo" ${P.otherAllowSocso ? 'checked' : ''}><span></span></label></div>
+    <div class="sec-title">${L('Slip Gaji & Levi', 'Payslip & Levy')}</div>
+    <div class="grid2">
+      <div class="field"><label class="lbl">${L('Gaya slip gaji', 'Payslip style')}</label><select class="input" id="pSlip">
+        <option value="classic" ${P.slipStyle !== 'modern' ? 'selected' : ''}>${L('Klasik korporat (Pendapatan | Potongan | Caruman Majikan)', 'Corporate classic (Earnings | Deductions | Employer contribution)')}</option>
+        <option value="modern" ${P.slipStyle === 'modern' ? 'selected' : ''}>${L('Moden (dengan ringkasan kehadiran)', 'Modern (with attendance summary)')}</option></select></div>
+      <div class="field"><label class="lbl">${L('Levi HRD Corp (majikan)', 'HRD Corp levy (employer)')}</label><select class="input" id="pHrd">
+        ${[[0, L('Tiada', 'None')], [0.5, '0.5%'], [1, '1%']].map(([v, t]) => `<option value="${v}" ${Number(P.hrdRate || 0) === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="set-row"><span>${L('Papar caruman majikan pada slip', 'Show employer contributions on payslip')}</span><label class="switch"><input type="checkbox" id="pSlipEr" ${P.slipEmployer !== false ? 'checked' : ''}><span></span></label></div>
+    <div class="set-row"><div><span>${L('Papar cop syarikat pada slip', 'Show company stamp on payslip')}</span><div class="xs muted">${L('Muat naik cop di Tetapan → Profil Syarikat.', 'Upload the stamp in Settings → Company Profile.')}</div></div><label class="switch"><input type="checkbox" id="pSlipSt" ${P.slipStamp !== false ? 'checked' : ''}><span></span></label></div>
   </div>
   <div class="card">
     <h3>${L('Kiraan Gaji', 'Pay Calculation')}</h3>
@@ -2416,7 +2446,8 @@ function drawPaySettings() {
           otherAllowEpf: $('#pOaEpf').checked, otherAllowSocso: $('#pOaSo').checked,
           workDaysPerMonth: v('pWd') || 26, hoursPerDay: v('pHd') || 8,
           deductUnpaid: $('#pUnpaid').checked, deductAbsent: $('#pAbsent').checked,
-          lateMode: $('#pLate').value, lateAmount: v('pLateAmt'), perfectBonus: v('pBonus')
+          lateMode: $('#pLate').value, lateAmount: v('pLateAmt'), perfectBonus: v('pBonus'),
+          slipStyle: $('#pSlip').value, hrdRate: Number($('#pHrd').value || 0), slipEmployer: $('#pSlipEr').checked, slipStamp: $('#pSlipSt').checked
         }
       });
       toast(L('Tetapan gaji disimpan.', 'Payroll settings saved.'));

@@ -10,7 +10,8 @@ export const PAYROLL_DEFAULTS = {
   workDaysPerMonth: 26, hoursPerDay: 8,
   epfEe: 0, epfEr: 0, socsoEe: 0, socsoEr: 0, eisEe: 0, eisEr: 0,
   deductUnpaid: true, deductAbsent: false, lateMode: 'none', lateAmount: 0,
-  otInEpf: false, otInSocso: false, perfectBonus: 0, otherAllowEpf: true, otherAllowSocso: true, statMode: 'table'
+  otInEpf: false, otInSocso: false, perfectBonus: 0, otherAllowEpf: true, otherAllowSocso: true, statMode: 'table',
+  slipStyle: 'classic', slipEmployer: true, slipStamp: true, hrdRate: 0
 };
 // Tetapan kewangan: kadar caruman, PCB setiap pekerja (pcbMap) & senarai elaun (KWSP/PERKESO)
 export const payrollSettings = (c) => ({ ...PAYROLL_DEFAULTS, ...(c?.payroll || {}), pcbMap: c?.pcbMap || {}, allowTpl: c?.allowanceTemplates || [] });
@@ -153,6 +154,7 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
   const item = {
     workerId: w.id, uid: w.uid || '', name: w.name, ic: w.ic || '', position: w.position || '', dept: w.dept || '',
     bank: w.bank || '', bankAcc: w.bankAcc || '', epfNo: w.epfNo || '', socsoNo: w.socsoNo || '', taxNo: w.taxNo || '',
+    thNo: w.thNo || '', asbNo: w.asbNo || '',
     payType: w.payType || 'monthly', rate: R.rate, dailyRate: R.daily, hourlyRate: R.hourly,
     days: { present: presentN, leavePaid, leaveUnpaid, absent, lateMin, lateDays, workHours: r2(workMin / 60), ot: otH },
     earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, period, claimIds, advanceIds, loanPays, branchId: w.branchId || ''
@@ -183,6 +185,11 @@ export function applyStatutory(item, P, w = {}) {
     ee = { epf: pick(st.epfEe, epfBase, P.epfEe), socso: pick(st.socsoEe, socsoBase, P.socsoEe), eis: pick(st.eisEe, socsoBase, P.eisEe), pcb: r2(pcb) };
     item.employer = { epf: pick(st.epfEr, epfBase, P.epfEr), socso: pick(st.socsoEr, socsoBase, P.socsoEr), eis: pick(st.eisEr, socsoBase, P.eisEr) };
   }
+  // Levi HRD Corp (majikan): % daripada gaji asas + elaun tetap bulanan
+  if (Number(P.hrdRate) > 0) {
+    const hrdBase = (item.earnings || []).filter(e => e.kind === 'basic' || (e.kind === 'allow' && !e.once)).reduce((a, e) => a + Number(e.amount || 0), 0);
+    item.employer.levy = r2(hrdBase * Number(P.hrdRate) / 100);
+  }
   item.base = { epf: r2(epfBase), socso: r2(socsoBase) };
   item.deductions = item.deductions.filter(d => !['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind));
   const stat = [
@@ -202,7 +209,7 @@ export function totals(item) {
   const ded = item.deductions.reduce((a, d) => a + Number(d.amount || 0), 0);
   item.gross = r2(gross); item.claims = r2(claims); item.totalDed = r2(ded);
   item.net = r2(gross + claims - ded);
-  item.employerTotal = r2((item.employer?.epf || 0) + (item.employer?.socso || 0) + (item.employer?.eis || 0));
+  item.employerTotal = r2((item.employer?.epf || 0) + (item.employer?.socso || 0) + (item.employer?.eis || 0) + (item.employer?.levy || 0));
   return item;
 }
 
@@ -262,11 +269,122 @@ export function payslipBody(c, slip, period) {
 </div>`;
 }
 
+// ---------- Slip gaji KLASIK (susunan korporat: pendapatan | potongan | maklumat & caruman majikan) ----------
+const CLASSIC_DED = [
+  ['epf', () => L('KWSP', 'EPF')], ['socso', () => L('PERKESO', 'SOCSO')], ['eis', () => L('SIP', 'EIS')], ['skbbk', () => 'SKBBK']
+];
+const OTHER_DED = [
+  ['tax', () => L('Cukai Pendapatan', 'Income Tax'), /cukai|income tax/i],
+  ['nopay', () => L('Cuti Tanpa Gaji', 'NoPay Leave'), null],
+  ['loan', () => L('Pinjaman', 'Loan'), /pinjaman|loan/i],
+  ['asb', () => 'ASB', /\basb\b/i],
+  ['th', () => L('Tabung Haji', 'Tabung Haji'), /tabung\s*haji|\bth\b/i],
+  ['personal', () => L('Peribadi', 'Personal'), /peribadi|personal/i],
+  ['zakat', () => 'Zakat', /zakat/i]
+];
+export function payslipClassic(c, slip, period) {
+  const P = payrollSettings(c);
+  const n2 = (v) => (v || v === 0) && Number(v) !== 0 ? Number(v).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+  const E = slip.earnings || [], D = slip.deductions || [];
+  const sumK = (arr, k) => arr.filter(x => x.kind === k).reduce((a, x) => a + Number(x.amount || 0), 0);
+  const bonus = sumK(E, 'bonus');
+  const arrears = E.filter(e => e.kind === 'other' && /tunggakan|arrears/i.test(e.name || '')).reduce((a, e) => a + Number(e.amount || 0), 0);
+  const allow = E.filter(e => e.kind === 'allow' || (e.kind === 'other' && !/tunggakan|arrears/i.test(e.name || '')) || e.kind === 'claim');
+  // Potongan "lain-lain" mengikut nama
+  const used = new Set();
+  const other = OTHER_DED.map(([k, lbl, re]) => {
+    let amt = 0;
+    D.forEach((d, i) => {
+      if (used.has(i) || ['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind)) return;
+      const hit = k === 'nopay' ? (d.kind === 'unpaid') : k === 'loan' ? (d.kind === 'loan' || d.kind === 'advance' || (re && re.test(d.name || ''))) : (re && re.test(d.name || ''));
+      if (hit) { amt += Number(d.amount || 0); used.add(i); }
+    });
+    return [lbl(), amt];
+  });
+  const extra = D.map((d, i) => ({ d, i })).filter(({ d, i }) => !used.has(i) && !['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind));
+  const er = slip.employer || {};
+  const erRows = [[L('KWSP', 'EPF'), er.epf], [L('PERKESO', 'SOCSO'), er.socso], [L('SIP', 'EIS'), er.eis], ...(er.levy ? [[L('LEVI HRD', 'HRD LEVY'), er.levy]] : [])];
+  const erTot = erRows.reduce((a, r) => a + Number(r[1] || 0), 0);
+  const [y, m] = String(period).split('-').map(Number);
+  const monthTxt = new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }).toUpperCase();
+  const earnRows = [
+    [L('Gaji Asas', 'Basic Salary'), sumK(E, 'basic')],
+    [L('Tunggakan Gaji', 'Salary Arrears'), arrears],
+    [L('Kerja Lebih Masa', 'Overtime'), sumK(E, 'ot')],
+    ...(bonus ? E.filter(e => e.kind === 'bonus').map(e => [e.name || 'Bonus', e.amount]) : [['Bonus', 0]])
+  ];
+  const infoRow = (k, v) => `<tr><td class="ck">${k}</td><td class="cv">${esc(v || '')}</td></tr>`;
+  const L2 = (rows) => rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${n2(v)}</td></tr>`).join('');
+  return `<div class="cl">
+  <div class="cl-head">${c.logo ? `<img src="${c.logo}" alt="">` : ''}
+    <div class="cl-co">${esc(c.name || '')}${c.ssm ? ` (${esc(c.ssm)})` : ''}</div>
+    <div class="cl-addr">${esc(c.address || '')}</div>
+    <div class="cl-addr">${[c.phone ? 'TEL : ' + esc(c.phone) : '', c.fax ? 'FAX : ' + esc(c.fax) : ''].filter(Boolean).join('&nbsp;&nbsp;&nbsp;')}</div></div>
+  <div class="cl-title"><span>${bonus ? L('SLIP GAJI & BONUS BAGI BULAN', 'SALARY & BONUS SLIP FOR THE MONTH OF') : L('SLIP GAJI BAGI BULAN', 'SALARY SLIP FOR THE MONTH OF')}</span><b>${monthTxt}</b></div>
+  <div class="cl-grid">
+    <div class="cl-left">
+      <table class="cl-name"><tr><td class="ck">${L('NAMA', 'NAME')}</td><td class="cv"><b>${esc(slip.name || '')}</b>${slip.position ? ` <span class="mut">· ${esc(slip.position)}</span>` : ''}</td></tr></table>
+      <div class="cl-cols">
+        <table class="cl-tbl"><tr class="h"><th>${L('Pendapatan', 'Earnings')} :</th><th class="r">RM</th></tr>
+          ${L2(earnRows)}
+          <tr class="sub"><td colspan="2"><u>${L('Elaun', 'Allowances')}</u></td></tr>
+          ${L2(allow.map(a => [a.name, a.amount]))}
+          <tr class="fill"><td></td><td></td></tr></table>
+        <table class="cl-tbl"><tr class="h"><th>${L('Potongan', 'Deductions')}:</th><th class="r">RM</th></tr>
+          <tr class="sub"><td colspan="2"><u>${L('Caruman Pekerja', "Employee's Contribution")}:</u></td></tr>
+          ${L2(CLASSIC_DED.filter(([k]) => k !== 'skbbk' || sumK(D, 'skbbk')).map(([k, l]) => [l(), sumK(D, k)]))}
+          <tr class="sub"><td colspan="2"><u>${L('Lain-lain', 'Others')}:</u></td></tr>
+          ${L2(other)}
+          ${L2(extra.map(({ d }) => [d.name, d.amount]))}
+          <tr><td>PCB</td><td class="r">${n2(sumK(D, 'pcb'))}</td></tr>
+          <tr class="fill"><td></td><td></td></tr></table>
+      </div>
+      <div class="cl-tots"><div><span>${L('GAJI KASAR', 'GROSS PAY')}</span><b>${n2((slip.gross || 0) + (slip.claims || 0)) || '0.00'}</b></div><div><span>${L('JUMLAH POTONGAN', 'TOTAL DEDUCTION')}</span><b>${n2(slip.totalDed) || '0.00'}</b></div></div>
+    </div>
+    <div class="cl-right">
+      <table class="cl-info">
+        ${infoRow(L('No. KP', 'NRIC No.'), slip.ic)}${infoRow(L('No. Akaun', 'A/C No.'), [slip.bank, slip.bankAcc].filter(Boolean).join('-'))}
+        ${infoRow(L('No. KWSP', 'EPF No.'), slip.epfNo)}${infoRow(L('No. PERKESO', 'Socso No.'), slip.socsoNo)}${infoRow(L('No. Cukai', 'Inc.Tax No'), slip.taxNo)}
+        ${infoRow(L('No. T.Haji', 'T.Haji No'), slip.thNo)}${infoRow(L('No. ASB', 'ASB No.'), slip.asbNo)}
+      </table>
+      ${P.slipEmployer !== false ? `<div class="cl-er"><u>${L('Caruman Majikan', "Employer's Contribution")}:</u></div>
+      <table class="cl-tbl cl-ert">${erRows.map(([k, v]) => `<tr><td>${k}</td><td class="r">${n2(v) || '0.00'}</td></tr>`).join('')}</table>
+      <div class="cl-ertot">${n2(erTot)}</div>` : ''}
+      <div class="cl-net"><span>${L('GAJI BERSIH', 'NET PAY')}</span><b>${n2(slip.net) || '0.00'}</b></div>
+      ${P.slipStamp !== false && c.stamp ? `<img class="cl-stamp" src="${c.stamp}" alt="">` : ''}
+    </div>
+  </div>
+  <p class="cl-foot">${L('Ini adalah slip gaji janaan komputer. Tandatangan tidak diperlukan.', 'This is a computer generated pay advice. No signature is required.')}</p>
+</div>`;
+}
+const CLASSIC_CSS = `
+  .cl{max-width:820px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#111}
+  .cl-head{text-align:center;margin-bottom:14px} .cl-head img{height:46px;max-width:160px;object-fit:contain;display:block;margin:0 auto 6px}
+  .cl-co{font-family:"Courier New",monospace;font-weight:700;font-size:13px;letter-spacing:.5px} .cl-addr{font-family:"Courier New",monospace;font-size:12px;white-space:pre-line;line-height:1.45}
+  .cl-title{display:flex;justify-content:center;align-items:center;gap:40px;margin:10px 0 14px;font-family:"Courier New",monospace;font-weight:700;font-size:12.5px}
+  .cl-title b{border:1.5px solid #111;padding:3px 34px;font-family:Arial,sans-serif;font-size:12px}
+  .cl-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;align-items:start}
+  .cl table{border-collapse:collapse;width:100%} .cl td,.cl th{padding:2px 4px;text-align:left;font-weight:normal} .cl .r{text-align:right}
+  .cl-name td{border:1px solid #111} .cl-name .ck{width:20%;font-weight:700}
+  .cl-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:2px}
+  .cl-tbl{border:1px solid #111;height:100%} .cl-tbl tr:not(.fill){height:1px} .cl-tbl .fill{height:auto} .cl-tbl td{border-right:1px solid #111} .cl-tbl td.r{border-right:0;width:38%}
+  .cl-tbl .h th{font-weight:700;border-bottom:1px solid #111} .cl-tbl .sub td{border-right:0;padding-top:6px} .cl-tbl .fill td{height:auto;min-height:14px}
+  .cl-tots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px} .cl-tots div{display:flex;justify-content:space-between;align-items:center;gap:6px;font-family:"Courier New",monospace;font-weight:700}
+  .cl-tots b{border:1.5px solid #111;padding:3px 8px;min-width:96px;text-align:right;font-family:Arial,sans-serif}
+  .cl-info td{border:1px solid #111} .cl-info .ck{text-align:right;width:42%} .cl-info .cv{text-align:right}
+  .cl-er{margin:16px 0 2px} .cl-ert td:first-child{width:35%} .cl-ertot{border:1.5px solid #111;text-align:right;padding:2px 6px;margin-left:30%;margin-top:3px}
+  .cl-net{display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-family:"Courier New",monospace;font-weight:700}
+  .cl-net b{border:2px solid #111;padding:5px 10px;min-width:150px;text-align:right;font-family:Arial,sans-serif;font-size:13px}
+  .cl-stamp{display:block;margin:14px 0 0 auto;max-width:130px;max-height:130px;object-fit:contain;opacity:.9}
+  .cl-foot{margin-top:6px;font-size:11px} .cl .mut{color:#555;font-size:10.5px}
+  @media(max-width:640px){.cl-grid,.cl-cols{grid-template-columns:1fr}}
+`;
+
 export function payslipHtml(c, slips, period) {
   const list = Array.isArray(slips) ? slips : [slips];
   const title = list.length === 1 ? `${L('Slip Gaji', 'Payslip')} ${list[0].name} ${period}` : `${L('Slip Gaji', 'Payslips')} ${period}`;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${SLIP_CSS(c)}</style></head><body>
-${list.map(sl => `<div class="page">${payslipBody(c, sl, period)}</div>`).join('')}
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${SLIP_CSS(c)}${CLASSIC_CSS}</style></head><body>
+${list.map(sl => `<div class="page">${payrollSettings(c).slipStyle === 'classic' ? payslipClassic(c, sl, period) : payslipBody(c, sl, period)}</div>`).join('')}
 <p class="noprint" style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 20px;font-size:14px;cursor:pointer">${L('Cetak / Simpan PDF', 'Print / Save PDF')}</button></p>
 </body></html>`;
 }
