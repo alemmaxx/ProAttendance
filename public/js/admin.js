@@ -636,7 +636,7 @@ function renderWorkerList() {
     <thead><tr><th>ID</th><th>${L('Nama', 'Name')}</th><th>${L('Jawatan', 'Position')}</th><th>${L('Lokasi', 'Location')}</th><th>${L('Status', 'Status')}</th><th></th></tr></thead>
     <tbody>${list.map(w => `<tr>
       <td class="mono bold">${esc(w.id)}</td>
-      <td>${esc(w.name)}<div class="xs muted">${esc(w.phone || '')}</div></td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:.5rem">${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="">` : `<span class="avatar">${esc((w.name || '?').trim()[0] || '?').toUpperCase()}</span>`}<div>${esc(w.name)}<div class="xs muted">${esc(w.phone || '')}</div></div></div></td>
       <td class="small">${esc(w.position || '-')}<div class="xs muted">${esc(w.dept || '')}</div></td>
       <td class="small">${esc(locName(w.branchId))}</td>
       <td>${w.active === false ? `<span class="badge b-bad">${L('Tidak aktif', 'Inactive')}</span>` : `<span class="badge b-ok">${L('Aktif', 'Active')}</span>`}
@@ -695,6 +695,13 @@ function workerForm(w) {
     body: `
     <form id="wf">
       <div class="sec-title">${L('Maklumat Peribadi', 'Personal Details')}</div>
+      <div class="row" style="margin-bottom:.8rem;flex-wrap:nowrap">
+        <div id="wPhP" class="avatar avatar-lg">${w.photo ? `<img src="${esc(w.photo)}" alt="">` : icon('user', 34)}</div>
+        <div><input type="hidden" name="photo" id="wPh" value="${esc(w.photo || '')}">
+          <div class="row"><label class="btn btn-sm btn-soft" style="margin:0">${icon('plus', 16)} ${L('Gambar pekerja', 'Staff photo')}<input type="file" accept="image/*" id="wPhF" hidden></label>
+          <button type="button" class="btn btn-sm btn-ghost ${w.photo ? '' : 'hide'}" id="wPhX">${L('Buang', 'Remove')}</button></div>
+          <div class="xs muted" style="margin-top:.3rem">${L('Pilihan. Dipaparkan dalam senarai pekerja & app pekerja.', 'Optional. Shown in the staff list & staff app.')}</div></div>
+      </div>
       <div class="grid2">
         <div class="field"><label class="lbl">${L('Nama penuh', 'Full name')} *</label><input class="input" name="name" required value="${esc(w.name || '')}"></div>
         <div class="field"><label class="lbl">${L('No. IC / Pasport', 'IC / Passport no.')}</label><input class="input" name="ic" value="${esc(w.ic || '')}"></div>
@@ -764,6 +771,15 @@ function workerForm(w) {
   });
   const el = m.el;
   bindDyn(el);
+  $('#wPhF', el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const url = await fileToDataURL(f, 320, 'image/jpeg', 0.8);
+      $('#wPh', el).value = url; $('#wPhP', el).innerHTML = `<img src="${url}" alt="">`; $('#wPhX', el).classList.remove('hide');
+    } catch { toast(L('Gambar tidak dapat dibaca.', 'Could not read the image.'), 'bad'); }
+    e.target.value = '';
+  };
+  $('#wPhX', el).onclick = () => { $('#wPh', el).value = ''; $('#wPhP', el).innerHTML = icon('user', 34); $('#wPhX', el).classList.add('hide'); };
   $('#addAllow', el).onclick = () => $('#allowBox', el).insertAdjacentHTML('beforeend', allowRow());
   $('#addDed', el).onclick = () => $('#dedBox', el).insertAdjacentHTML('beforeend', dedRow());
   const syncWd = () => $$('[data-wwd]', el).forEach(x => x.disabled = !$('#wdOwn', el).checked);
@@ -777,7 +793,7 @@ async function saveWorker(el, w) {
   if (!f.reportValidity()) return false;
   const fd = Object.fromEntries(new FormData(f).entries());
   const data = {
-    name: fd.name.trim(), ic: fd.ic.trim(), phone: fd.phone.trim(), email: fd.email.trim(), dob: fd.dob || '',
+    name: fd.name.trim(), photo: fd.photo || '', ic: fd.ic.trim(), phone: fd.phone.trim(), email: fd.email.trim(), dob: fd.dob || '',
     position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, startDate: fd.startDate || '',
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),

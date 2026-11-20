@@ -127,6 +127,24 @@ function workingNow() {
   }
   return true;
 }
+// Lokasi semasa → nama tempat (lokasi syarikat berdekatan dahulu, kemudian carian peta)
+async function herePlace(fresh = false) {
+  if (!fresh && S._here && Date.now() - S._here.at < 5 * 60000) return S._here;
+  const pos = await getPosition(12000);
+  const near = (S.locations || []).filter(l => l.lat != null).map(l => ({ l, d: haversine(pos.lat, pos.lng, l.lat, l.lng) }))
+    .sort((a, b) => a.d - b.d)[0];
+  const name = near && near.d <= Math.max(150, near.l.radius || 0) ? near.l.name : (await placeName(pos.lat, pos.lng)) || `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+  S._here = { name, lat: pos.lat, lng: pos.lng, at: Date.now() };
+  return S._here;
+}
+const planList = (d) => String(S.plans?.[d] || '').split('\n').map(x => x.trim()).filter(Boolean);
+async function savePlan(date, lines) {
+  const note = lines.map(x => x.trim()).filter(Boolean).join('\n').slice(0, 1500);
+  const ref = doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${date}`);
+  if (!note) { await deleteDoc(ref); delete S.plans[date]; return; }
+  await setDoc(ref, { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date, note, at: serverTimestamp() });
+  S.plans = S.plans || {}; S.plans[date] = note;
+}
 async function placeName(lat, lng) {
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=${lat}&lon=${lng}&accept-language=ms,en`, { headers: { Accept: 'application/json' } });
@@ -386,7 +404,7 @@ function renderShell() {
         <div class="co">${esc(S.company.name)}</div>
         <div class="small" style="opacity:.85">${esc(w.name)} · ${esc(S.me.workerId)}</div>
       </div>
-      ${langBtn()}
+      ${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="">` : ''}${langBtn()}
     </div>
   </div>
   <main class="w-main" id="view"></main>
@@ -487,7 +505,8 @@ function viewHome() {
   tick(); S.clockT = setInterval(tick, 1000);
   $('#mainBtn').onclick = (e) => punch(main, e.currentTarget);
   if ($('#visitBtn')) { $('#visitBtn').onclick = visitForm; checkOutsideOffice(); }
-  $$('[data-plan]').forEach(r => r.onclick = () => planNote(r.dataset.plan));
+  $$('[data-plan]').forEach(r => r.onclick = (e) => { if (e.target.closest('[data-here]')) return; planNote(r.dataset.plan); });
+  fillHere();
   drawWeekStrip();
   $('#lvCard') && ($('#lvCard').onclick = () => go('mohon'));
   $$('[data-alt]').forEach(b => b.onclick = (e) => punch(b.dataset.alt, e.currentTarget));
@@ -563,7 +582,9 @@ function upcomingHtml() {
       : info.type === 'holiday' && !info.shift ? `<span class="badge b-info">${esc(info.holiday)}</span>`
       : `<span class="badge b-brand">${esc(shiftLabel(info.shift))}</span>`;
     rows.push(`<div class="set-row" data-plan="${d}" style="cursor:pointer"><div><b>${i === 0 ? L('Hari ini', 'Today') : dayName(dt.getDay())}</b>, ${fmtDate(d, { day: 'numeric', month: 'short' })}
-      <div class="xs" style="color:${S.plans?.[d] ? 'var(--gold)' : 'var(--muted)'}">${S.plans?.[d] ? '📍 ' + esc(S.plans[d]) : '+ ' + L('Ke mana hari ini?', 'Where to?')}</div></div>${lbl}</div>`);
+      ${planList(d).map(x => `<div class="xs" style="color:var(--gold)">📍 ${esc(x)}</div>`).join('')}
+      <div class="xs muted">+ ${planList(d).length ? L('Tambah tempat lain', 'Add another place') : L('Ke mana hari ini?', 'Where to?')}</div>
+      ${i === 0 ? `<div class="here-line xs" id="hereLine"><span class="muted">📡 ${L('Mencari lokasi semasa…', 'Finding current location…')}</span></div>` : ''}</div>${lbl}</div>`);
   }
   return `<div class="card"><h3>${L('Jadual & catatan', 'Schedule & notes')}</h3>${rows.join('')}</div>`;
 }
@@ -783,28 +804,66 @@ function taskDone(task) {
   };
 }
 
-// Catatan "pergi mana" untuk satu tarikh (pilihan)
+// Lokasi semasa di kad "Jadual & catatan" (dicari automatik bila app dibuka)
+async function fillHere() {
+  const box = $('#hereLine'); if (!box) return;
+  try {
+    const h = await herePlace();
+    if (!$('#hereLine')) return;
+    const t = todayStr(), has = planList(t).includes(h.name);
+    $('#hereLine').innerHTML = `<span class="muted">📡 ${L('Sekarang', 'Now')}:</span> <b>${esc(h.name)}</b>
+      ${has ? `<span class="muted">✓</span>` : `<button type="button" class="btn btn-sm btn-soft" data-here style="min-height:26px;padding:2px 9px;margin-left:4px">+ ${L('Tambah', 'Add')}</button>`}`;
+    const b = $('[data-here]'); b && (b.onclick = async (e) => {
+      e.stopPropagation(); busy(b, true);
+      try { await savePlan(t, [...planList(t), h.name]); toast(L('Lokasi ditambah ke catatan hari ini.', 'Location added to today\'s notes.')); refreshPlanViews(); }
+      catch (er) { toast(authErr(er), 'bad'); busy(b, false); }
+    });
+  } catch { $('#hereLine') && ($('#hereLine').innerHTML = `<span class="muted">📡 ${L('Lokasi tidak dapat dikesan — hidupkan GPS.', 'Location unavailable — turn on GPS.')}</span>`); }
+}
+
+// Catatan "pergi mana" untuk satu tarikh — boleh banyak tempat (tapak berlainan setiap hari)
 function planNote(date, after) {
-  const cur = S.plans?.[date] || '';
-  modal({
+  let list = planList(date);
+  const isToday = date === todayStr();
+  const m = modal({
     title: `📍 ${fmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}`,
-    body: `<p class="small muted">${L('Catat ke mana anda pergi / bekerja pada hari ini (pilihan). Majikan boleh lihat.', 'Note where you will go / work on this day (optional). Your employer can see it.')}</p>
-      <div class="field"><input class="input" id="pn" maxlength="120" value="${esc(cur)}" placeholder="${L('cth: Tapak projek Cyberjaya', 'e.g. Cyberjaya project site')}"></div>`,
+    body: `<p class="small muted" style="margin-top:0">${L('Senaraikan tempat / tapak yang anda pergi hari ini. Boleh tambah lebih dari satu. Majikan boleh lihat.', 'List the places / sites you go to on this day. You can add more than one. Your employer can see it.')}</p>
+      <div id="plBox"></div>
+      <div class="row" style="margin-top:.4rem">
+        <button type="button" class="btn btn-sm btn-plus" id="plAdd">${icon('plus', 16)} ${L('Tambah tempat', 'Add place')}</button>
+        ${isToday ? `<button type="button" class="btn btn-sm btn-soft" id="plHere">${icon('pin', 16)} ${L('Guna lokasi semasa', 'Use current location')}</button>` : ''}
+      </div>
+      <datalist id="plSaved">${[...new Set([...(S.locations || []).map(l => l.name), ...Object.values(S.plans || {}).flatMap(v => String(v).split('\n'))].map(x => x.trim()).filter(x => x && x.length < 80))].slice(0, 60).map(x => `<option value="${esc(x)}">`).join('')}</datalist>`,
     actions: [
-      ...(cur ? [{ label: L('Padam', 'Delete'), cls: 'btn-danger', onClick: async () => {
-        try { await deleteDoc(doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${date}`)); delete S.plans[date]; (after || refreshPlanViews)(); }
-        catch (e) { toast(authErr(e), 'bad'); return false; } } }] : []),
       { label: L('Batal', 'Cancel') },
       { label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
-        const note = $('#pn', el).value.trim();
-        if (!note) { toast(L('Sila isi catatan.', 'Please enter a note.'), 'warn'); return false; }
-        try {
-          await setDoc(doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${date}`), { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date, note, at: serverTimestamp() });
-          S.plans[date] = note; (after || refreshPlanViews)();
-        } catch (e) { toast(authErr(e), 'bad'); return false; }
+        sync(el);
+        try { await savePlan(date, list); toast(L('Disimpan.', 'Saved.')); (after || refreshPlanViews)(); }
+        catch (e) { toast(authErr(e), 'bad'); return false; }
       } }
     ]
   });
+  const el = m.el;
+  const sync = () => { list = $$('[data-pl]', el).map(i => i.value); };
+  const draw = () => {
+    if (!list.length) list = [''];
+    $('#plBox', el).innerHTML = list.map((x, i) => `<div class="pl-row"><span class="pl-n">${i + 1}</span>
+      <input class="input" data-pl maxlength="120" list="plSaved" value="${esc(x)}" placeholder="${L('cth: Tapak projek Cyberjaya', 'e.g. Cyberjaya project site')}">
+      <button type="button" class="icon-btn" data-plx="${i}" aria-label="${L('Buang', 'Remove')}">✕</button></div>`).join('');
+  };
+  draw();
+  $('#plBox', el).addEventListener('click', (e) => { const b = e.target.closest('[data-plx]'); if (!b) return; sync(); list.splice(Number(b.dataset.plx), 1); draw(); });
+  $('#plAdd', el).onclick = () => { sync(); list.push(''); draw(); $$('[data-pl]', el).pop().focus(); };
+  const useHere = async (btn, fresh) => {
+    btn && busy(btn, true);
+    try {
+      const h = await herePlace(fresh); sync();
+      if (!list.includes(h.name)) { const k = list.findIndex(x => !x.trim()); if (k >= 0) list[k] = h.name; else list.push(h.name); }
+      draw();
+    } catch { toast(L('Tidak dapat lokasi GPS.', 'Could not get GPS location.'), 'warn'); }
+    btn && busy(btn, false);
+  };
+  $('#plHere', el) && ($('#plHere', el).onclick = (e) => useHere(e.currentTarget, true));
 }
 // Butiran satu hari: kehadiran, lawatan, catatan + tindakan (tuntutan / betulkan punch)
 async function openDay(d, recs) {
@@ -838,7 +897,7 @@ async function openDay(d, recs) {
       ${visits.length ? `<div class="sec-title">${L('Lawatan tapak', 'Site visits')}</div>${visits.map(v => `<div class="set-row"><span>${fmtTime(punchTime(v))} · ${esc(v.locName)}${v.note ? `<div class="xs muted">${esc(v.note)}</div>` : ''}</span>${v.lat != null ? `<a class="xs" target="_blank" href="https://www.google.com/maps?q=${v.lat},${v.lng}">${L('Peta', 'Map')}</a>` : ''}</div>`).join('')}` : ''}
       ${trail.length > 1 ? `<div class="sec-title">${L('Jejak lokasi', 'Location trail')}</div>${trail.map(p => `<div class="set-row"><span>${fmtTime(p.t)} · ${esc(p.n || '-')}${p.auto ? ' <span class="badge b-warn">AUTO</span>' : ''}</span>${p.lat != null ? `<a class="xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${p.lat},${p.lng}">${L('Peta', 'Map')}</a>` : ''}</div>`).join('')}` : ''}
       ${claims.length ? `<div class="sec-title">${L('Tuntutan hari ini', 'Claims this day')}</div>${claims.map(c => `<div class="set-row"><span>${esc(c.category || '')}${c.km ? ` · ${c.km} km` : ''}</span><span>${money(c.amount)} ${statusBadge(c.status)}</span></div>`).join('')}` : ''}
-      <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b class="right">${esc(S.plans?.[d] || '-')}</b></div>
+      <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b class="right">${planList(d).map(esc).join('<br>') || '-'}</b></div>
       <div class="stack" style="margin-top:.8rem">
         <button class="btn btn-soft btn-block" data-da="note">📍 ${S.plans?.[d] ? L('Ubah catatan', 'Edit note') : L('Tambah catatan pergi mana', 'Add where-to note')}</button>
         ${d <= t ? `<button class="btn btn-soft btn-block" data-da="claim">💰 ${L('Tambah perjalanan ke tuntutan bulan ini', "Add journey to this month's claim")}</button>
@@ -1303,10 +1362,10 @@ function journeyForm(cl, j = {}, idx = null, after) {
   let pts = j.points?.length ? j.points.map(p => ({ ...p })) : [{ n: '', lat: null, lng: null }, { n: '', lat: null, lng: null }];
   let kmAuto = j.km || 0, est = false, manual = !!(j.km && !j.points?.length);
   const ptRow = (p, i) => `<div class="jpt" data-pi="${i}">
-      <span class="jpt-n">${i === 0 ? L('Dari', 'From') : i === pts.length - 1 ? L('Ke', 'To') : L('Hentian', 'Stop') + ' ' + i}</span>
+      <span class="jpt-n">${i === 0 ? '🟢 ' + L('Mula', 'Start') : i === pts.length - 1 ? '🏁 ' + L('Tamat', 'End') : '• ' + L('Hentian', 'Stop') + ' ' + i}</span>
       <input class="input" data-pn value="${esc(p.n || '')}" placeholder="${L('Nama tempat', 'Place name')}" list="savedPl">
       <input class="input mono" data-pc value="${p.lat != null ? `${p.lat}, ${p.lng}` : ''}" placeholder="${L('koordinat / pautan Google Maps', 'coordinates / Google Maps link')}">
-      <button type="button" class="icon-btn" data-pg title="${L('Lokasi semasa', 'Current location')}">${icon('gps', 18)}</button>
+      <button type="button" class="icon-btn" data-pg title="${L('Lokasi semasa', 'Current location')}">${icon('pin', 18)}</button>
       ${pts.length > 2 ? `<button type="button" class="icon-btn" data-px>✕</button>` : '<span></span>'}
     </div>`;
   const m = modal({
@@ -1319,9 +1378,9 @@ function journeyForm(cl, j = {}, idx = null, after) {
       <div class="sec-title" style="margin-top:.2rem">Journey From/To</div>
       <p class="xs muted" style="margin-top:-.3rem">${L('Pilih tempat tersimpan, tekan 📍 untuk lokasi semasa, atau tampal koordinat / pautan Google Maps. Jarak & RM dikira automatik.', 'Pick a saved place, tap 📍 for current location, or paste coordinates / a Google Maps link. Distance & RM are calculated automatically.')}</p>
       <div id="jPts"></div>
-      <div class="row"><button type="button" class="btn btn-sm btn-soft" id="jTrail">${icon('pin', 16)} ${L('Isi dari jejak lokasi hari ini', 'Fill from today\'s location trail')}</button></div>
-      <div class="row"><button type="button" class="btn btn-sm btn-plus" id="jAddPt">${icon('plus', 16)} ${L('Tambah hentian', 'Add stop')}</button>
-        <label class="check"><input type="checkbox" id="jRt" ${j.roundTrip ? 'checked' : ''}>${L('Pergi-balik (kembali ke titik mula)', 'Round trip (back to start)')}</label></div>
+      <div class="row" style="margin-top:.2rem"><button type="button" class="btn btn-sm btn-plus" id="jAddPt">${icon('plus', 16)} ${L('Tambah hentian (sebelum Tamat)', 'Add stop (before End)')}</button>
+        <button type="button" class="btn btn-sm btn-soft" id="jTrail">${icon('pin', 16)} ${L('Isi dari jejak lokasi', 'Fill from location trail')}</button></div>
+      <label class="check" style="margin-top:.5rem"><input type="checkbox" id="jRt" ${j.roundTrip ? 'checked' : ''}>${L('Pergi-balik (dari Tamat kembali ke Mula)', 'Round trip (from End back to Start)')}</label>
       <div class="card" style="margin-top:.6rem;padding:.8rem">
         <div class="row between"><span>${L('Jarak', 'Distance')}</span><b id="jKm">-</b></div>
         <div class="row between"><span>Mileage × RM${R.km}/km</span><b id="jMil">RM0.00</b></div>
@@ -1338,7 +1397,9 @@ function journeyForm(cl, j = {}, idx = null, after) {
       {
         label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
           const row = read(el);
-          if (!row.date || !row.route) { toast(L('Sila isi tarikh dan tempat perjalanan.', 'Please fill in date and journey places.'), 'warn'); return false; }
+          if (!row.date) { toast(L('Sila isi tarikh.', 'Please fill in the date.'), 'warn'); return false; }
+          if (!manual && (!pts[0]?.n || !pts[pts.length - 1]?.n)) { toast(L('Perjalanan mesti ada tempat Mula dan Tamat.', 'A journey must have a Start and an End place.'), 'warn'); return false; }
+          if (!row.route) { toast(L('Sila isi tempat perjalanan.', 'Please fill in the journey places.'), 'warn'); return false; }
           if (row.date.slice(0, 7) !== cl.month) { toast(L('Tarikh mesti dalam bulan tuntutan ini.', 'Date must be within this claim month.'), 'warn'); return false; }
           const J = [...(cl.journeys || [])];
           if (idx === null) J.push(row); else J[idx] = row;
@@ -1413,9 +1474,9 @@ function journeyForm(cl, j = {}, idx = null, after) {
     if (e.target.closest('[data-pg]')) {
       const b = e.target.closest('[data-pg]'); b.disabled = true;
       try {
-        const p = await getPosition(12000);
+        const p = await herePlace(true);
         $('[data-pc]', r).value = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
-        if (!$('[data-pn]', r).value.trim()) $('[data-pn]', r).value = L('Lokasi semasa', 'Current location');
+        if (!$('[data-pn]', r).value.trim()) $('[data-pn]', r).value = p.name;
         calc();
       } catch { toast(L('Tidak dapat lokasi GPS.', 'Could not get GPS location.'), 'warn'); }
       b.disabled = false;
@@ -1427,7 +1488,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
     try {
       const tr = (await loadTrail(d)).filter(p => p.lat != null);
       // Buang titik berturutan dalam 100 m
-      const out = []; tr.forEach(p => { const q = out[out.length - 1]; if (!q || haversine(q.lat, q.lng, p.lat, p.lng) >= 100) out.push(p); });
+      const out = []; tr.forEach(p => { const q = out[out.length - 1]; if (!q || (haversine(q.lat, q.lng, p.lat, p.lng) >= 100 && (!p.n || p.n !== q.n))) out.push(p); });
       if (out.length < 2) { toast(L('Tiada pergerakan direkod pada tarikh ini.', 'No movement recorded on this date.'), 'warn'); return; }
       pts = out.map(p => ({ n: p.n || `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`, lat: p.lat, lng: p.lng }));
       drawPts(); calc();

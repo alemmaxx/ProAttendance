@@ -307,9 +307,13 @@ td .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;cursor:poin
 .cal-s{display:block;font:600 8.5px var(--f);opacity:.75;margin-top:2px;text-transform:uppercase;letter-spacing:.2px}
 
 /* Titik perjalanan tuntutan */
-.jpt{display:grid;grid-template-columns:64px 1fr 1fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
+.jpt{display:grid;grid-template-columns:78px minmax(0,1fr) minmax(0,1fr) 44px 44px;gap:6px;align-items:center;margin-bottom:6px}
+.jpt .icon-btn,.pl-row .icon-btn{width:44px;height:44px}
+.pl-row{display:grid;grid-template-columns:22px minmax(0,1fr) 44px;gap:6px;align-items:center;margin-bottom:6px}
+.pl-n{font-size:.75rem;color:var(--muted);font-weight:700;text-align:center}
+.here-line{margin-top:3px;display:flex;align-items:center;flex-wrap:wrap;gap:2px}
 .jpt-n{font-size:.75rem;color:var(--muted);font-weight:700}
-@media(max-width:560px){.jpt{grid-template-columns:1fr auto auto}.jpt-n,.jpt [data-pn]{grid-column:1/-1}}
+@media(max-width:560px){.jpt{grid-template-columns:minmax(0,1fr) 44px 44px}.jpt-n,.jpt [data-pn]{grid-column:1/-1}}
 
 /* Manual pengguna (pop-up, gaya ProSewa) */
 .manual details{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
@@ -322,3 +326,8 @@ td .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;cursor:poin
 .manual p{margin:8px 0 0;font-size:14px}
 .help-fab{position:fixed;right:16px;bottom:16px;z-index:45;width:46px;height:46px;border-radius:50%;border:1px solid var(--gold);background:var(--gold2);color:var(--gold);font:800 20px var(--f);cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.35)}
 @media(max-width:860px){.help-fab{bottom:84px}}
+
+.avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;display:inline-grid;place-items:center;background:var(--gold2);color:var(--gold);font-weight:800;font-size:14px;overflow:hidden;border:1px solid var(--line)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.avatar-lg{width:76px;height:76px;font-size:26px}
+.w-top .avatar{width:40px;height:40px;border:2px solid var(--gold)}
