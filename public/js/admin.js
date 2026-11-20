@@ -384,6 +384,17 @@ function updateBrandBits() {
       : c.status === 'trial' ? `<span class="badge b-warn">${L('Percubaan', 'Trial')}: ${d} ${L('hari', 'days')}</span>`
       : d <= 7 ? `<span class="badge b-warn">${d} ${L('hari lagi', 'days left')}</span>` : '';
   }
+  // Jalur peringatan langganan hampir tamat (untuk pemilik / pengurus)
+  $('#expBanner')?.remove();
+  const d = daysLeft(c);
+  if (!isExpired(c) && d <= 7 && !isSupervisor() && !S.me?.support && $('#view')) {
+    const el = document.createElement('div');
+    el.id = 'expBanner'; el.className = 'card'; el.style.cssText = 'border-color:var(--warn);background:var(--warn-soft);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px';
+    el.innerHTML = `<span>⏰ ${c.status === 'trial' ? L(`Tempoh percubaan tamat dalam <b>${d} hari</b>.`, `Your trial ends in <b>${d} days</b>.`) : L(`Langganan tamat dalam <b>${d} hari</b>.`, `Subscription ends in <b>${d} days</b>.`)} ${L('Pekerja tidak boleh punch selepas tamat.', 'Staff cannot punch after it ends.')}</span>
+      <button class="btn btn-sm btn-primary" id="expPay">${L('Bayar sekarang', 'Pay now')}</button>`;
+    $('#view').insertAdjacentElement('beforebegin', el);
+    $('#expPay').onclick = () => go('billing');
+  }
 }
 
 function go(v) {
@@ -1476,12 +1487,42 @@ async function viewBilling() {
     const s = await getDocs(query(collection(db, 'payments'), where('cid', '==', S.cid)));
     const list = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (toDate(b.createdAt)?.getTime() || 0) - (toDate(a.createdAt)?.getTime() || 0));
     $('#bHist').innerHTML = list.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Pakej', 'Plan')}</th><th>${L('Jumlah', 'Amount')}</th><th>${L('Status', 'Status')}</th><th>Ref</th></tr></thead>
+      <thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Pakej', 'Plan')}</th><th>${L('Jumlah', 'Amount')}</th><th>${L('Status', 'Status')}</th><th>Ref</th><th></th></tr></thead>
       <tbody>${list.map(p => `<tr><td>${fmtDateTime(p.createdAt)}</td><td>${planName(p.plan)}</td><td>${money(p.amount)}</td>
         <td><span class="badge ${p.status === 'paid' ? 'b-ok' : p.status === 'failed' ? 'b-bad' : 'b-warn'}">${p.status === 'paid' ? L('Berjaya', 'Paid') : p.status === 'failed' ? L('Gagal', 'Failed') : L('Menunggu', 'Pending')}</span></td>
-        <td class="xs mono">${esc(p.billCode || p.id)}</td></tr>`).join('')}</tbody></table></div>`
+        <td class="xs mono">${esc(p.billCode || p.id)}</td><td>${p.status === 'paid' ? `<button class="btn btn-sm btn-soft" data-rcpt="${esc(p.id)}">${icon('print', 14)} ${L('Resit', 'Receipt')}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
       : `<div class="empty small">${L('Tiada bayaran lagi.', 'No payments yet.')}</div>`;
+    $$('[data-rcpt]').forEach(b => b.onclick = () => openPrint(receiptHtml(list.find(x => x.id === b.dataset.rcpt)), false) || toast(L('Benarkan pop-up.', 'Allow pop-ups.'), 'warn'));
   } catch (e) { $('#bHist').innerHTML = `<div class="empty small">${esc(authErr(e))}</div>`; }
+}
+// Resit langganan (cetak / PDF)
+function receiptHtml(p) {
+  const c = S.company, sp = S.plans || {};
+  const d = (t) => { const x = toDate(t); return x ? x.toLocaleDateString('en-GB') : '-'; };
+  const no = 'PA-' + (toDate(p.paidAt) || new Date()).toISOString().slice(0, 7).replace('-', '') + '-' + String(p.id).slice(-6).toUpperCase();
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${L('Resit', 'Receipt')} ${no}</title><style>
+    *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:32px;font-size:13px}
+    .w{max-width:720px;margin:0 auto} .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:14px}
+    .brand{display:flex;gap:12px;align-items:center} .brand b{font-size:18px} h1{font-size:22px;margin:0;letter-spacing:.06em}
+    table{width:100%;border-collapse:collapse;margin-top:18px} th,td{border:1px solid #ccc;padding:8px 10px;text-align:left} th{background:#f2f4f7}
+    .r{text-align:right} .meta td{border:0;padding:3px 0} .muted{color:#666;font-size:11px} .tot td{font-weight:700;background:#fff8e1}
+    .paid{display:inline-block;border:2px solid #16a34a;color:#16a34a;font-weight:700;padding:4px 12px;border-radius:6px;transform:rotate(-4deg);margin-top:16px}
+    @media print{body{padding:0}}
+  </style></head><body><div class="w">
+    <div class="top"><div class="brand"><img src="${location.origin}/icon.svg" width="44" height="44" alt=""><div><b>${esc(sp.sellerName || 'KUKUSAN LEGACY')}</b><div class="muted">ProAttendance${sp.sellerSsm ? ' · SSM ' + esc(sp.sellerSsm) : ''}</div>
+      <div class="muted">${esc(sp.sellerAddr || '')}${sp.sellerEmail ? '<br>' + esc(sp.sellerEmail) : ''}</div></div></div>
+      <div style="text-align:right"><h1>${L('RESIT', 'RECEIPT')}</h1><div class="muted">No. ${no}</div><div class="muted">${L('Tarikh', 'Date')}: ${d(p.paidAt || p.createdAt)}</div></div></div>
+    <table class="meta" style="margin-top:14px"><tr><td style="width:120px" class="muted">${L('Diterima daripada', 'Received from')}</td><td><b>${esc(c.name)}</b></td></tr>
+      <tr><td class="muted">${L('Alamat', 'Address')}</td><td>${esc(c.address || '-')}</td></tr><tr><td class="muted">${L('E-mel', 'Email')}</td><td>${esc(c.email || c.ownerEmail || '-')}</td></tr>
+      <tr><td class="muted">${L('Kod syarikat', 'Company code')}</td><td>${esc(c.code)}</td></tr></table>
+    <table><thead><tr><th>${L('Perkara', 'Description')}</th><th class="r">${L('Jumlah (RM)', 'Amount (RM)')}</th></tr></thead><tbody>
+      <tr><td>${L('Langganan ProAttendance', 'ProAttendance subscription')} — ${esc(planName(p.plan))}${p.newExpiry ? `<div class="muted">${L('Aktif sehingga', 'Active until')} ${d(p.newExpiry)}</div>` : ''}${p.promo ? `<div class="muted">${L('Kod promo', 'Promo code')}: ${esc(p.promo)}${p.discount ? ` (−${Number(p.discount)}%)` : ''}</div>` : ''}</td><td class="r">${Number(p.amount || 0).toFixed(2)}</td></tr>
+      <tr class="tot"><td class="r">${L('JUMLAH DIBAYAR', 'TOTAL PAID')}</td><td class="r">RM ${Number(p.amount || 0).toFixed(2)}</td></tr></tbody></table>
+    <table class="meta" style="margin-top:12px"><tr><td style="width:120px" class="muted">${L('Kaedah', 'Method')}</td><td>ToyyibPay (FPX / ${L('kad', 'card')})</td></tr>
+      <tr><td class="muted">${L('Rujukan', 'Reference')}</td><td>${esc(p.refNo || p.billCode || p.id)}</td></tr></table>
+    <div class="paid">${L('DIBAYAR', 'PAID')}</div>
+    <p class="muted" style="margin-top:28px">${L('Resit ini dijana oleh komputer dan tidak memerlukan tandatangan.', 'This is a computer-generated receipt; no signature is required.')}</p>
+  </div><script>setTimeout(()=>print(),400)</script></body></html>`;
 }
 function planName(p) {
   return ({ monthly: L('Bulanan', 'Monthly'), sixMonth: L('6 Bulan', '6 Months'), yearly: L('Tahunan', 'Yearly'), trial: L('Percubaan', 'Trial'), manual: L('Manual', 'Manual') })[p] || (p || '-');

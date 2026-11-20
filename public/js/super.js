@@ -227,6 +227,10 @@ async function viewPlans() {
       <div class="field"><label class="lbl">${L('6 Bulan (RM)', '6 Months (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="p6" value="${p.sixMonth ?? 0}"></div>
       <div class="field"><label class="lbl">${L('Tahunan (RM)', 'Yearly (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="py" value="${p.yearly ?? 0}"></div>
       <div class="field"><label class="lbl">${L('No. WhatsApp jualan (landing page)', 'Sales WhatsApp no. (landing page)')}</label><input class="input" id="pw" value="${esc(p.salesPhone || '')}" placeholder="60123456789"></div>
+      <div class="field"><label class="lbl">${L('Nama penjual (pada resit)', 'Seller name (on receipts)')}</label><input class="input" id="psN" value="${esc(p.sellerName || 'KUKUSAN LEGACY')}"></div>
+      <div class="field"><label class="lbl">${L('No. pendaftaran SSM', 'SSM registration no.')}</label><input class="input" id="psS" value="${esc(p.sellerSsm || '')}"></div>
+      <div class="field"><label class="lbl">${L('Alamat penjual', 'Seller address')}</label><input class="input" id="psA" value="${esc(p.sellerAddr || '')}"></div>
+      <div class="field"><label class="lbl">${L('E-mel penjual', 'Seller email')}</label><input class="input" id="psE" value="${esc(p.sellerEmail || '')}"></div>
     </div>
     <button class="btn btn-primary" id="sv" style="margin-top:.8rem">${L('Simpan', 'Save')}</button>
   </div>`;
@@ -235,7 +239,8 @@ async function viewPlans() {
     try {
       await setDoc(doc(db, 'config', 'plans'), {
         trialDays: Math.round(Number($('#td').value || 0)), monthly: Number($('#pm').value || 0),
-        sixMonth: Number($('#p6').value || 0), yearly: Number($('#py').value || 0), salesPhone: $('#pw').value.replace(/\D/g, '')
+        sixMonth: Number($('#p6').value || 0), yearly: Number($('#py').value || 0), salesPhone: $('#pw').value.replace(/\D/g, ''),
+        sellerName: $('#psN').value.trim(), sellerSsm: $('#psS').value.trim(), sellerAddr: $('#psA').value.trim(), sellerEmail: $('#psE').value.trim()
       }, { merge: true });
       toast(L('Disimpan.', 'Saved.'));
     } catch (err) { toast(authErr(err), 'bad'); }

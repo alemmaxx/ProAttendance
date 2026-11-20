@@ -7,6 +7,7 @@ const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestor
 const { getAuth } = require('firebase-admin/auth');
 const { getMessaging } = require('firebase-admin/messaging');
 const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 
 initializeApp();
 const db = getFirestore('proattendance');
@@ -392,4 +393,24 @@ exports.pa_passkeyRemove = onCall({ region: REGION }, async (req) => {
   const mine = await db.collection('passkeys').where('uid', '==', req.auth.uid).get();
   await Promise.all(mine.docs.map(d => d.ref.delete()));
   return { removed: mine.size };
+});
+
+
+// ================================================================ PERINGATAN LANGGANAN HAMPIR TAMAT
+// Setiap pagi 9:00 (waktu Malaysia): notifikasi kepada pemilik / pengurus 7, 3 & 1 hari sebelum tamat, dan pada hari tamat.
+exports.pa_expiryReminder = onSchedule({ schedule: 'every day 09:00', timeZone: 'Asia/Kuala_Lumpur', region: REGION }, async () => {
+  const now = Date.now(), DAY = 86400000;
+  const s = await db.collection('companies').where('expiry', '<=', Timestamp.fromMillis(now + 8 * DAY)).where('expiry', '>=', Timestamp.fromMillis(now - DAY)).get();
+  const full = t => t.role === 'admin' && t.perm !== 'supervisor';
+  await Promise.all(s.docs.map(async d => {
+    const c = d.data();
+    if (c.status === 'suspended') return;
+    const left = Math.ceil((c.expiry.toMillis() - now) / DAY);
+    if (![7, 3, 1, 0].includes(left)) return;
+    const what = c.status === 'trial' ? 'Tempoh percubaan' : 'Langganan';
+    const body = left > 0
+      ? `${what} ${c.name || ''} tamat dalam ${left} hari. Bayar sekarang supaya pekerja boleh terus punch.`
+      : `${what} ${c.name || ''} tamat hari ini. Pekerja tidak boleh punch selepas tamat — sila bayar.`;
+    await sendTo(d.id, full, left > 0 ? `⏰ ${left} hari lagi` : '⚠️ Langganan tamat hari ini', body, '/');
+  }));
 });
