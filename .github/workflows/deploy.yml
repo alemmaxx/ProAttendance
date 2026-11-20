@@ -1,12 +1,17 @@
-name: Deploy ke Firebase Hosting
+name: Deploy ke Firebase
 
-# Pilihan: deploy automatik dari GitHub.
+# Deploy automatik dari GitHub (laman, peraturan pangkalan data & functions) —
+# tidak perlu laptop / deploy.bat. Berjalan setiap kali kod baharu masuk ke "main",
+# atau tekan "Run workflow" di tab Actions (boleh dari telefon).
 # Hanya berjalan jika secret FIREBASE_SERVICE_ACCOUNT_KUKUSANMY telah ditambah.
-# Jika tidak, guna deploy.bat di komputer.
 on:
   push:
     branches: [main]
   workflow_dispatch: {}
+
+concurrency:
+  group: deploy-proattendance
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -14,15 +19,35 @@ jobs:
     env:
       HAS_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KUKUSANMY != '' }}
     steps:
-      - uses: actions/checkout@v4
       - name: Langkau (tiada secret)
         if: env.HAS_SA != 'true'
-        run: echo "Secret belum ditambah - guna deploy.bat untuk deploy."
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+        run: echo "Secret FIREBASE_SERVICE_ACCOUNT_KUKUSANMY belum ditambah - guna deploy.bat untuk deploy."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_SA == 'true'
+
+      - uses: actions/setup-node@v4
         if: env.HAS_SA == 'true'
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KUKUSANMY }}
-          channelId: live
-          projectId: kukusanmy
-          target: proattendance
+          node-version: 22
+
+      - name: Pasang pakej functions
+        if: env.HAS_SA == 'true'
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+
+      - name: Kunci akses Firebase
+        if: env.HAS_SA == 'true'
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KUKUSANMY }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy (laman + peraturan + functions)
+        if: env.HAS_SA == 'true'
+        run: npx --yes firebase-tools@latest deploy --project kukusanmy --only hosting:proattendance,firestore:proattendance,functions:proattendance --non-interactive --force
+
+      - name: Padam kunci
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
