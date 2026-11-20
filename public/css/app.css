@@ -40,7 +40,7 @@ p{margin:.3rem 0}
 .pghero .sub{font-size:14px;opacity:.86;margin:4px 0 0}
 
 /* ---------- Butang & input ---------- */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:0;border-radius:8px;padding:11px 16px;font:700 14px var(--f);cursor:pointer;background:var(--soft2);color:var(--ink);transition:transform .1s,filter .15s;text-decoration:none;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border:0;border-radius:8px;padding:11px 16px;font:700 14px var(--f);cursor:pointer;background:var(--soft2);color:var(--ink);transition:transform .1s,filter .15s;text-decoration:none;white-space:nowrap;vertical-align:middle;line-height:1.25;min-height:44px;box-sizing:border-box}
 .btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.6;cursor:not-allowed}
 .btn-primary{background:var(--brand);color:var(--on-brand)}
@@ -51,7 +51,8 @@ p{margin:.3rem 0}
 .btn-ok{background:var(--ok);color:#06291a}
 .btn-warn{background:var(--warn);color:#1b1503}
 .btn-soft{background:var(--gold2);color:var(--gold)}
-.btn-sm{padding:7px 11px;font-size:13px}
+.btn-sm{padding:7px 11px;font-size:13px;min-height:34px}
+.btn .ic{flex-shrink:0}
 .btn-block{width:100%}
 .btn-plus{border:1px dashed var(--gold);color:var(--gold);background:var(--gold2)}
 .icon-btn{border:0;background:var(--soft);font-size:1rem;cursor:pointer;color:var(--ink);width:36px;height:36px;border-radius:10px;display:inline-grid;place-items:center}
@@ -86,6 +87,7 @@ input[type=file].input{padding:9px}
 /* ---------- Kad & statistik ---------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin:0}
 .card+.card{margin-top:12px}
+.grid2>.card+.card,.grid3>.card+.card,.stats>.card+.card{margin-top:0}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:.6rem;margin-bottom:.8rem;flex-wrap:wrap}
 .card-head h3{margin:0}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px}

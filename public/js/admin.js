@@ -747,7 +747,7 @@ function workerForm(w) {
       <p class="xs muted" style="margin-top:-.3rem">${L('KWSP / PERKESO untuk setiap elaun ditetapkan oleh finance di Gaji → Tetapan Kewangan.', 'EPF / SOCSO for each allowance is set by finance in Payroll → Finance Settings.')}</p>
       <datalist id="dedList">${['Zakat', 'Tabung Haji', 'ASB', L('Pinjaman', 'Loan'), L('Peribadi', 'Personal'), L('Cukai Pendapatan', 'Income Tax')].map(x => `<option value="${esc(x)}">`).join('')}</datalist>
       <datalist id="allowList">${tpls.map(t => `<option value="${esc(t.name)}">`).join('')}</datalist>
-      <div id="allowBox">${(w.allowances || []).map(allowRow).join('')}</div>
+      <div id="allowBox">${(w.allowances || []).map(a => allowRow(a)).join('')}</div>
       <div class="row">
         <button type="button" class="btn btn-sm btn-plus" id="addAllow">${icon('plus', 16)} ${L('Tambah Elaun', 'Add Allowance')}</button>
         ${tpls.length ? `<select class="input" id="tplSel" style="width:auto;padding:.38rem .6rem;font-size:.85rem">
@@ -3635,7 +3635,7 @@ async function staffCalendar(w, month) {
       ${stat(X ? money(X.reimbursement) : '-', `${L('Tuntutan', 'Claim')}${claim ? ' · ' + esc(claim.status) : ''}`)}
     </div>
     <div class="cal" style="margin-top:.6rem">
-      ${[1, 2, 3, 4, 5, 6, 0].map(i => `<div class="cal-k">${dayName(i)}</div>`).join('')}
+      ${[1, 2, 3, 4, 5, 6, 0].map(i => `<div class="cal-h">${dayName(i)}</div>`).join('')}
       ${'<div></div>'.repeat(lead)}
       ${info.map(x => `<button type="button" class="cal-d ${CLS[x.st] || ''} ${x.d === t ? 'cal-today' : ''}" data-scd="${x.d}" style="aspect-ratio:auto;min-height:74px;align-content:start;padding:4px 2px;line-height:1.15">
         <b>${Number(x.d.slice(8))}</b>
