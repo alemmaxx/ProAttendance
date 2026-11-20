@@ -700,6 +700,9 @@ function workerForm(w) {
         <div class="field"><label class="lbl">${L('No. KWSP', 'EPF no.')}</label><input class="input" name="epfNo" value="${esc(w.epfNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. PERKESO', 'SOCSO no.')}</label><input class="input" name="socsoNo" value="${esc(w.socsoNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. cukai (LHDN)', 'Tax no. (LHDN)')}</label><input class="input" name="taxNo" value="${esc(w.taxNo || '')}"></div>
+        <div class="field"><label class="lbl">${L('Status (untuk caruman)', 'Status (for contributions)')}</label><select class="input" name="nationality">${opts([['citizen', L('Warganegara', 'Citizen')], ['pr', L('Pemastautin Tetap (PR)', 'Permanent Resident (PR)')], ['foreign', L('Pekerja asing', 'Foreign worker')]], w.nationality || 'citizen')}</select></div>
+        <label class="check small"><input type="checkbox" name="socsoCat2" ${w.socsoCat2 ? 'checked' : ''}>${L('PERKESO Kategori 2 (mula mencarum pada umur 55+)', 'SOCSO Category 2 (first contributed at age 55+)')}</label>
+        <label class="check small"><input type="checkbox" name="skbbkOut" ${w.skbbk === false ? 'checked' : ''}>${L('Tarik diri SKBBK / Lindung 24 Jam (warganegara sahaja)', 'Opted out of SKBBK / Lindung 24 Jam (locals only)')}</label>
       </div>
       <div class="sec-title">${L('Syif & Hari Bekerja', 'Shift & Work Days')}</div>
       <div class="grid2">
@@ -755,6 +758,7 @@ async function saveWorker(el, w) {
     position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, startDate: fd.startDate || '',
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
+    nationality: fd.nationality || 'citizen', socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
     allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp(),
     defaultShift: fd.defaultShift || '',
     workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],
@@ -1800,6 +1804,7 @@ function payTotals(items) {
     epf: sum(x => (x.deductions || []).filter(d => d.kind === 'epf').reduce((a, d) => a + d.amount, 0) + (x.employer?.epf || 0)),
     socso: sum(x => (x.deductions || []).filter(d => d.kind === 'socso').reduce((a, d) => a + d.amount, 0) + (x.employer?.socso || 0)),
     eis: sum(x => (x.deductions || []).filter(d => d.kind === 'eis').reduce((a, d) => a + d.amount, 0) + (x.employer?.eis || 0)),
+    skbbk: sum(x => (x.deductions || []).filter(d => d.kind === 'skbbk').reduce((a, d) => a + d.amount, 0)),
     pcb: sum(x => (x.deductions || []).filter(d => d.kind === 'pcb').reduce((a, d) => a + d.amount, 0))
   };
 }
@@ -2053,13 +2058,13 @@ async function unlockPayrun(period, run, btn) {
 function payExcel(period, items, t) {
   if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
   const dk = (x, k) => r2((x.deductions || []).filter(d => d.kind === k).reduce((a, d) => a + d.amount, 0));
-  const other = (x) => r2((x.deductions || []).filter(d => !['epf', 'socso', 'eis', 'pcb'].includes(d.kind)).reduce((a, d) => a + d.amount, 0));
+  const other = (x) => r2((x.deductions || []).filter(d => !['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind)).reduce((a, d) => a + d.amount, 0));
   const head = [[S.company.name], [`${L('Gaji', 'Payroll')}: ${periodLabel(period)}`], []];
   const rows = items.map(x => [x.workerId, x.name, x.ic, x.bank, x.bankAcc, x.days?.present ?? 0, x.gross, x.claims || 0,
-    dk(x, 'epf'), dk(x, 'socso'), dk(x, 'eis'), dk(x, 'pcb'), other(x), x.totalDed, x.net, x.employer?.epf || 0, x.employer?.socso || 0, x.employer?.eis || 0]);
+    dk(x, 'epf'), dk(x, 'socso'), dk(x, 'eis'), dk(x, 'skbbk'), dk(x, 'pcb'), other(x), x.totalDed, x.net, x.employer?.epf || 0, x.employer?.socso || 0, x.employer?.eis || 0]);
   const ws = XLSX.utils.aoa_to_sheet([...head,
     ['ID', L('Nama', 'Name'), 'IC', 'Bank', L('No. akaun', 'Account'), L('Hadir', 'Present'), L('Kasar', 'Gross'), L('Tuntutan', 'Claims'),
-      L('KWSP pekerja', 'EPF ee'), L('PERKESO pekerja', 'SOCSO ee'), L('SIP pekerja', 'EIS ee'), 'PCB', L('Potongan lain', 'Other ded.'), L('Jumlah potongan', 'Total ded.'), L('Bersih', 'Net'),
+      L('KWSP pekerja', 'EPF ee'), L('PERKESO pekerja', 'SOCSO ee'), L('SIP pekerja', 'EIS ee'), 'SKBBK', 'PCB', L('Potongan lain', 'Other ded.'), L('Jumlah potongan', 'Total ded.'), L('Bersih', 'Net'),
       L('KWSP majikan', 'EPF er'), L('PERKESO majikan', 'SOCSO er'), L('SIP majikan', 'EIS er')],
     ...rows, [], ['', L('JUMLAH', 'TOTAL'), '', '', '', '', t.gross, t.claims, '', '', '', t.pcb, '', t.ded, t.net]]);
   ws['!cols'] = [{ wch: 9 }, { wch: 26 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, ...Array(13).fill({ wch: 12 })];
@@ -2085,9 +2090,22 @@ function drawPaySettings() {
   const num = (id, v, step = '0.01') => `<input class="input" type="number" step="${step}" min="0" id="${id}" value="${v}">`;
   $('#payBody').innerHTML = `
   <div class="card">
-    <h3>${L('Kadar Caruman (peratus)', 'Contribution Rates (percent)')}</h3>
-    <p class="small muted">${L('Isi kadar rasmi KWSP, PERKESO & SIP semasa. Caruman semua pekerja dikira automatik daripada gaji asas + elaun yang dikenakan caruman. Angka masih boleh disunting semasa proses gaji jika perlu.', 'Enter the current official EPF, SOCSO & EIS rates. Contributions for all staff are calculated automatically from basic pay + contributable allowances. Figures remain editable during payroll if needed.')}</p>
-    <div class="table-wrap" style="margin-top:.6rem"><table>
+    <h3>${L('Caruman Berkanun', 'Statutory Contributions')}</h3>
+    <div class="field"><label class="lbl">${L('Kaedah kiraan', 'Calculation method')}</label>
+      <select class="input" id="pMode" style="max-width:460px">
+        <option value="table" ${P.statMode !== 'percent' ? 'selected' : ''}>${L('Jadual rasmi KWSP / PERKESO / SIP / SKBBK (disyorkan)', 'Official EPF / SOCSO / EIS / SKBBK tables (recommended)')}</option>
+        <option value="percent" ${P.statMode === 'percent' ? 'selected' : ''}>${L('Peratus manual (isi sendiri)', 'Manual percentage (enter yourself)')}</option>
+      </select></div>
+    <div id="pModeTable" class="${P.statMode === 'percent' ? 'hide' : ''}">
+      <p class="small muted">${L('Dikira automatik ikut jadual rasmi (kemas kini Nov 2026), status warganegara & umur setiap pekerja:', 'Calculated automatically from the official schedules (updated Nov 2026), each staff member\'s citizenship & age:')}</p>
+      <ul class="small" style="padding-left:1.1rem;line-height:1.6;margin:.3rem 0 .6rem">
+        <li>${L('KWSP: 11% pekerja; majikan 13% (≤RM5,000) / 12%. Umur ≥60: 0% / 4%. Asing: 2% / 2%. Ikut julat Jadual Ketiga.', 'EPF: 11% employee; employer 13% (≤RM5,000) / 12%. Age ≥60: 0% / 4%. Foreign: 2% / 2%. Third Schedule bands.')}</li>
+        <li>${L('PERKESO: Kategori 1 — majikan 1.75%, pekerja 0.5%; Kategori 2 (≥60) — majikan 1.25%. Siling RM6,000.', 'SOCSO: Category 1 — employer 1.75%, employee 0.5%; Category 2 (≥60) — employer 1.25%. Ceiling RM6,000.')}</li>
+        <li>${L('SIP: 0.2% + 0.2% (bukan untuk asing / ≥60). Siling RM6,000.', 'EIS: 0.2% + 0.2% (not for foreign / ≥60). Ceiling RM6,000.')}</li>
+        <li>${L('SKBBK / Lindung 24 Jam: 0.75% pekerja sahaja (wajib untuk asing; warganegara boleh tarik diri di profil pekerja).', 'SKBBK / Lindung 24 Jam: 0.75% employee only (mandatory for foreign staff; locals can opt out in the staff profile).')}</li>
+      </ul>
+    </div>
+    <div class="table-wrap ${P.statMode === 'percent' ? '' : 'hide'}" id="pModePct" style="margin-top:.6rem"><table>
       <thead><tr><th></th><th>${L('Pekerja (%)', 'Employee (%)')}</th><th>${L('Majikan (%)', 'Employer (%)')}</th></tr></thead>
       <tbody>
         <tr><td>${L('KWSP', 'EPF')}</td><td>${num('pEpfEe', P.epfEe)}</td><td>${num('pEpfEr', P.epfEr)}</td></tr>
@@ -2231,13 +2249,14 @@ function drawPaySettings() {
   };
 
 
+  $('#pMode').onchange = (e) => { $('#pModeTable').classList.toggle('hide', e.target.value === 'percent'); $('#pModePct').classList.toggle('hide', e.target.value !== 'percent'); };
   $('#pSave').onclick = async (e) => {
     const v = (id) => Number($('#' + id).value || 0);
     busy(e.currentTarget, true);
     try {
       await updateDoc(cRef(), {
         payroll: {
-          epfEe: v('pEpfEe'), epfEr: v('pEpfEr'), socsoEe: v('pSoEe'), socsoEr: v('pSoEr'), eisEe: v('pEiEe'), eisEr: v('pEiEr'),
+          statMode: $('#pMode').value, epfEe: v('pEpfEe'), epfEr: v('pEpfEr'), socsoEe: v('pSoEe'), socsoEr: v('pSoEr'), eisEe: v('pEiEe'), eisEr: v('pEiEr'),
           otInEpf: $('#pOtEpf').checked, otInSocso: $('#pOtSo').checked,
           otherAllowEpf: $('#pOaEpf').checked, otherAllowSocso: $('#pOaSo').checked,
           workDaysPerMonth: v('pWd') || 26, hoursPerDay: v('pHd') || 8,

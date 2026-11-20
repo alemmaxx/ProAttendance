@@ -1,5 +1,6 @@
 // ProAttendance — Gaji (Fasa 3)
 // Semua kadar caruman (KWSP, PERKESO, SIP, PCB) diisi secara manual oleh admin syarikat.
+import { epf as epfT, socso as socsoT, eis as eisT, ageAt } from './statutory.js';
 import { L, esc, todayStr, toDate, summarizeDay, money, fmtDate } from './ui.js';
 import { resolveDay, lateSettings, leaveTypes, otKind, otRates, dateRange, OT_LABEL } from './sched.js';
 
@@ -9,7 +10,7 @@ export const PAYROLL_DEFAULTS = {
   workDaysPerMonth: 26, hoursPerDay: 8,
   epfEe: 0, epfEr: 0, socsoEe: 0, socsoEr: 0, eisEe: 0, eisEr: 0,
   deductUnpaid: true, deductAbsent: false, lateMode: 'none', lateAmount: 0,
-  otInEpf: false, otInSocso: false, perfectBonus: 0, otherAllowEpf: true, otherAllowSocso: true
+  otInEpf: false, otInSocso: false, perfectBonus: 0, otherAllowEpf: true, otherAllowSocso: true, statMode: 'table'
 };
 // Tetapan kewangan: kadar caruman, PCB setiap pekerja (pcbMap) & senarai elaun (KWSP/PERKESO)
 export const payrollSettings = (c) => ({ ...PAYROLL_DEFAULTS, ...(c?.payroll || {}), pcbMap: c?.pcbMap || {}, allowTpl: c?.allowanceTemplates || [] });
@@ -154,7 +155,7 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
     bank: w.bank || '', bankAcc: w.bankAcc || '', epfNo: w.epfNo || '', socsoNo: w.socsoNo || '', taxNo: w.taxNo || '',
     payType: w.payType || 'monthly', rate: R.rate, dailyRate: R.daily, hourlyRate: R.hourly,
     days: { present: presentN, leavePaid, leaveUnpaid, absent, lateMin, lateDays, workHours: r2(workMin / 60), ot: otH },
-    earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, claimIds, advanceIds, loanPays, branchId: w.branchId || ''
+    earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, period, claimIds, advanceIds, loanPays, branchId: w.branchId || ''
   };
   applyStatutory(item, P, w);
   return totals(item);
@@ -168,19 +169,27 @@ export function applyStatutory(item, P, w = {}) {
   const epfBase = Math.max(0, item.earnings.filter(e => e.epf).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const socsoBase = Math.max(0, item.earnings.filter(e => e.socso).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const pick = (ov, base, pct) => (ov !== undefined && ov !== null && ov !== '') ? r2(ov) : r2(base * Number(pct || 0) / 100);
-  const ee = {
-    epf: pick(st.epfEe, epfBase, P.epfEe), socso: pick(st.socsoEe, socsoBase, P.socsoEe),
-    eis: pick(st.eisEe, socsoBase, P.eisEe), pcb: r2(pcb)
-  };
-  item.employer = {
-    epf: pick(st.epfEr, epfBase, P.epfEr), socso: pick(st.socsoEr, socsoBase, P.socsoEr), eis: pick(st.eisEr, socsoBase, P.eisEr)
-  };
+  let ee, skbbk = 0;
+  if (P.statMode !== 'percent') {
+    // Jadual rasmi KWSP / PERKESO / SIP / SKBBK ikut status & umur pekerja
+    const period = item.period || new Date().toISOString().slice(0, 7);
+    const o = { nationality: w.nationality || 'citizen', age: ageAt(w.dob, period), cat2: !!w.socsoCat2, skbbk: w.skbbk !== false, period };
+    const E = epfT(epfBase, o), So = socsoT(socsoBase, o), Ei = eisT(socsoBase, o);
+    ee = { epf: E.ee, socso: So.ee, eis: Ei.ee, pcb: r2(pcb) };
+    skbbk = So.skbbk;
+    item.employer = { epf: E.er, socso: So.er, eis: Ei.er };
+    item.statNote = [E.note, So.cat === 2 ? L('PERKESO Kategori 2', 'SOCSO Category 2') : ''].filter(Boolean).join(' · ');
+  } else {
+    ee = { epf: pick(st.epfEe, epfBase, P.epfEe), socso: pick(st.socsoEe, socsoBase, P.socsoEe), eis: pick(st.eisEe, socsoBase, P.eisEe), pcb: r2(pcb) };
+    item.employer = { epf: pick(st.epfEr, epfBase, P.epfEr), socso: pick(st.socsoEr, socsoBase, P.socsoEr), eis: pick(st.eisEr, socsoBase, P.eisEr) };
+  }
   item.base = { epf: r2(epfBase), socso: r2(socsoBase) };
-  item.deductions = item.deductions.filter(d => !['epf', 'socso', 'eis', 'pcb'].includes(d.kind));
+  item.deductions = item.deductions.filter(d => !['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind));
   const stat = [
     { kind: 'epf', name: L('KWSP (pekerja)', 'EPF (employee)'), amount: ee.epf },
     { kind: 'socso', name: L('PERKESO (pekerja)', 'SOCSO (employee)'), amount: ee.socso },
     { kind: 'eis', name: L('SIP (pekerja)', 'EIS (employee)'), amount: ee.eis },
+    { kind: 'skbbk', name: L('PERKESO Lindung 24 Jam (SKBBK)', 'SOCSO Lindung 24 Jam (SKBBK)'), amount: skbbk },
     { kind: 'pcb', name: L('PCB / Cukai', 'PCB / Tax'), amount: ee.pcb }
   ].filter(x => x.amount > 0);
   item.deductions = [...stat, ...item.deductions];

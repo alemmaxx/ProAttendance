@@ -13,8 +13,8 @@ try {
 } catch (e) { /* notifikasi tidak disokong */ }
 
 // ProAttendance service worker — network-first, cache sebagai sandaran
-const CACHE = 'pa-v28';
-const SHELL = ['/', '/worker', '/worker.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/js/sched.js', '/js/payroll.js', '/js/push.js', '/js/claims.js', '/js/fs.js', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.json'];
+const CACHE = 'pa-v29';
+const SHELL = ['/', '/worker', '/worker.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/js/sched.js', '/js/payroll.js', '/js/push.js', '/js/claims.js', '/js/fs.js', '/js/statutory.js', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}));
