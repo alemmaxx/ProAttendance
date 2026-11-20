@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ProAttendance — Sistem Kehadiran & Gaji Pekerja</title>
   <meta name="description" content="Sistem kehadiran pekerja online: punch guna telefon (GPS, QR, selfie), cuti & OT online, gaji & slip gaji automatik. Cuba percuma.">
-  <meta name="theme-color" content="#111827">
+  <meta name="theme-color" content="#0b0f17">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="/css/app.css">
   <style>
     .hero{position:relative;padding:2rem 1.2rem 4rem;text-align:center;overflow:hidden;isolation:isolate}
-    .hero::before{content:"";position:absolute;inset:0;z-index:-2;background:radial-gradient(120% 80% at 85% 10%,#0f5a45 0%,transparent 60%),radial-gradient(90% 70% at 0% 100%,#2a2210 0%,transparent 60%),var(--bg)}
+    .hero::before{content:"";position:absolute;inset:0;z-index:-2;background:radial-gradient(120% 80% at 85% 10%,#1c2f52 0%,transparent 60%),radial-gradient(90% 70% at 0% 100%,#2a2210 0%,transparent 60%),var(--bg)}
     .hero::after{content:"";position:absolute;inset:0;z-index:-1;background:var(--star) 0 0/56px;opacity:.07;mask-image:linear-gradient(180deg,#000 10%,transparent 85%);-webkit-mask-image:linear-gradient(180deg,#000 10%,transparent 85%)}
     .hero h1{font-size:clamp(2.2rem,7vw,4rem);max-width:900px;margin:0 auto .8rem}
     .hero p{font-size:1.1rem;opacity:.88;max-width:640px;margin:0 auto 1.6rem}
@@ -112,7 +112,7 @@
         ].map(([q, a]) => `<details><summary>${q}</summary><p class="muted">${a}</p></details>`).join('')}
         <div class="center" style="margin-top:2rem"><a class="btn btn-primary btn-xl" href="${reg}">${L(`Mula Percubaan Percuma ${td} Hari`, `Start ${td}-Day Free Trial`)}</a></div>
       </section>
-      <footer>© ${new Date().getFullYear()} ProAttendance · <a href="/admin.html">${L('Log masuk majikan', 'Employer login')}</a></footer>
+      <footer>© ${new Date().getFullYear()} ProAttendance · <a href="/">${L('Log masuk majikan', 'Employer login')}</a> · <a href="/privasi.html">${L('Terma & Privasi', 'Terms & Privacy')}</a></footer>
       ${wa ? `<a class="wa-float" style="display:inline-flex;gap:.4rem;align-items:center" href="${wa}" target="_blank">${icon('chat', 18)} WhatsApp</a>` : ''}`;
       applyLang();
     }

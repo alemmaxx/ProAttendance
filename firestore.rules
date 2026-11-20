@@ -116,7 +116,7 @@ service cloud.firestore {
         // Pekerja hanya boleh kemas kini medan tertentu pada rekod sendiri.
         allow update: if isFullAdmin(cid) || (
           isWorkerOf(cid) && resource.data.uid == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePin', 'deviceId', 'lastLogin', 'lang'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePin', 'deviceId', 'lastLogin', 'lang', 'pdpaAt', 'pdpaVer'])
           && (resource.data.get('deviceId', null) == null
               || request.resource.data.get('deviceId', null) == resource.data.get('deviceId', null))
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['mustChangePin'])

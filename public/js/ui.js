@@ -370,10 +370,10 @@ export function applyBrand(c) {
   root.setProperty('--gold', color);
   root.setProperty('--on-brand', lum > 0.55 ? '#1b1503' : '#ffffff');
   root.setProperty('--brand-dark', shade(color, -0.2));
-  root.setProperty('--brand-soft', mix(color, '#0a1210', 0.18));
-  root.setProperty('--gold2', mix(color, '#0a1210', 0.18));
+  root.setProperty('--brand-soft', mix(color, '#0b0f17', 0.18));
+  root.setProperty('--gold2', mix(color, '#0b0f17', 0.18));
   const meta = document.querySelector('meta[name=theme-color]');
-  if (meta) meta.content = '#0a1210';
+  if (meta) meta.content = '#0b0f17';
   $$('[data-brand-name]').forEach(el => el.textContent = c.name || '');
   $$('[data-brand-logo]').forEach(el => { el.innerHTML = logoHtml(c); });
 }

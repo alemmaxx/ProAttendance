@@ -106,6 +106,7 @@ function renderAuth(mode = 'login') {
       </div>
       <div class="divider"></div>
       <p class="center small"><a href="/worker">${L('Log masuk Pekerja', 'Staff login')}</a></p>
+      <p class="center xs" style="margin-top:.6rem"><a href="/privasi.html" target="_blank">${L('Terma & Notis Privasi', 'Terms & Privacy Notice')}</a></p>
     </form>
   </div>`;
   $$('[data-m]').forEach(b => b.onclick = () => renderAuth(b.dataset.m));
@@ -199,6 +200,8 @@ function renderOnboarding(extra = false) {
         <p class="xs muted" id="ccMsg">${L('Kod ini menjadi awalan ID pekerja, cth: KOD001. Tidak boleh ditukar.', 'This becomes the staff ID prefix, e.g. CODE001. Cannot be changed.')}</p></div>
       <div class="field"><label class="lbl">${L('E-mel syarikat', 'Company email')} *</label>
         <input class="input" id="cp" type="email" required maxlength="120" value="${esc(S.user.email || '')}"></div>
+      <label class="check small" style="margin:.2rem 0 .8rem;align-items:flex-start"><input type="checkbox" id="obTerms" required>
+        <span>${L('Saya bersetuju dengan <a href="/privasi.html" target="_blank">Terma & Notis Privasi</a>, dan akan mendapatkan persetujuan pekerja untuk data kehadiran (GPS, swafoto) & gaji.', 'I agree to the <a href="/privasi.html" target="_blank">Terms & Privacy Notice</a>, and will obtain staff consent for attendance (GPS, selfie) & payroll data.')}</span></label>
       <button class="btn btn-primary btn-block" id="ob" type="submit">${L('Mula Sekarang', 'Get Started')}</button>
       <p class="center small" style="margin-top:1rem">${extra ? `<button type="button" class="link-btn" id="back">← ${L('Kembali', 'Back')}</button> · ` : ''}${S.isSuper ? `<a href="/superadmin.html">Super Admin</a> · ` : ''}<button type="button" class="link-btn" id="lo">${L('Log keluar', 'Log out')}</button></p>
     </form>
@@ -231,7 +234,7 @@ function renderOnboarding(extra = false) {
       let ref = '';
       try { ref = (localStorage.getItem('pa_ref') || '').toUpperCase().slice(0, 20); } catch {}
       b.set(newRef, {
-        name, code, email: $('#cp').value.trim(), phone: '', ownerUid: S.user.uid, ownerEmail: S.user.email || '', ref,
+        name, code, email: $('#cp').value.trim(), phone: '', termsAt: serverTimestamp(), termsVer: '2026-11', ownerUid: S.user.uid, ownerEmail: S.user.email || '', ref,
         logo: '', address: '', ssm: '', color: '#d9b44a',
         status: 'trial', plan: 'trial', expiry, createdAt: serverTimestamp(), seq: 0, workerCount: 0,
         settings: { workStart: '09:00', workEnd: '18:00', grace: 10, workDays: [1, 2, 3, 4, 5], selfie: true, oneDevice: false },
@@ -591,12 +594,14 @@ function viewWorkers() {
   <div class="card">
     <div class="card-head">
       <input class="input" id="wq" style="max-width:280px" placeholder="${L('Cari nama / ID…', 'Search name / ID…')}">
-      <div class="row"><button class="btn btn-ghost" id="cardsAll">${icon('qr', 18)} ${L('Kad semua', 'All cards')}</button>
+      <div class="row"><button class="btn btn-ghost" id="impW">${icon('dl', 18)} ${L('Import Excel', 'Import Excel')}</button>
+      <button class="btn btn-ghost" id="cardsAll">${icon('qr', 18)} ${L('Kad semua', 'All cards')}</button>
       <button class="btn btn-primary" id="addW">${icon('plus', 18)} ${L('Tambah Pekerja', 'Add Staff')}</button></div>
     </div>
     <div id="wList"></div>
   </div>`;
   $('#addW').onclick = () => workerForm(null);
+  $('#impW').onclick = importWorkers;
   $('#cardsAll').onclick = () => printCards(S.workers.filter(w => w.active !== false));
   $('#wq').oninput = renderWorkerList;
   renderWorkerList();
@@ -3091,5 +3096,142 @@ function autoRoster(from, preIds, preWeeks = 4) {
       toast(L('Jadual dijana.', 'Roster generated.'));
       m.close(); drawWeek();
     } catch (e) { toast(authErr(e), 'bad'); }
+  };
+}
+
+
+// ================================================================ IMPORT PEKERJA DARI EXCEL
+const IMP_COLS = [
+  ['name', 'Nama *'], ['ic', 'No. IC / Pasport'], ['phone', 'No. Telefon'], ['email', 'E-mel'], ['dob', 'Tarikh Lahir (YYYY-MM-DD)'],
+  ['position', 'Jawatan'], ['dept', 'Jabatan'], ['startDate', 'Tarikh Mula Kerja (YYYY-MM-DD)'],
+  ['payType', 'Jenis Gaji (Bulanan / Harian / Jam)'], ['salary', 'Gaji / Kadar (RM)'],
+  ['nationality', 'Status (Warganegara / PR / Asing)'],
+  ['bank', 'Bank'], ['bankAcc', 'No. Akaun Bank'], ['epfNo', 'No. KWSP'], ['socsoNo', 'No. PERKESO'], ['taxNo', 'No. Cukai'],
+  ['a1n', 'Elaun 1 — Nama'], ['a1v', 'Elaun 1 — RM sebulan'], ['a2n', 'Elaun 2 — Nama'], ['a2v', 'Elaun 2 — RM sebulan']
+];
+function impTemplate() {
+  if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
+  const head = IMP_COLS.map(c => c[1]);
+  const ex = ['Ahmad bin Ali', '900101-10-1234', '0123456789', 'ahmad@email.com', '1990-01-01', 'Juruteknik', (S.company.departments || [])[0] || 'Operasi', '2026-01-02', 'Bulanan', 2500, 'Warganegara', 'Maybank', '1640123456', '12345678', '', '', 'Elaun Rumah', 150, 'Transport', 200];
+  const ws = XLSX.utils.aoa_to_sheet([head, ex]);
+  ws['!cols'] = head.map(h => ({ wch: Math.max(14, h.length + 2) }));
+  const info = XLSX.utils.aoa_to_sheet([
+    ['Cara isi'], ['1. Satu baris = seorang pekerja. Padam baris contoh sebelum import.'], ['2. Hanya "Nama" wajib. Lajur lain boleh dikosongkan & diisi kemudian.'],
+    ['3. Tarikh dalam format YYYY-MM-DD (cth: 2026-01-02).'], ['4. Jenis Gaji: Bulanan, Harian atau Jam.'], ['5. Status: Warganegara, PR atau Asing (untuk kiraan KWSP/PERKESO/SIP).'],
+    ['6. ID pekerja & PIN dijana automatik. Selepas import, muat turun senarai ID & PIN untuk diberi kepada pekerja.'],
+    ['Jabatan sedia ada: ' + ((S.company.departments || []).join(', ') || '-')]
+  ]);
+  info['!cols'] = [{ wch: 100 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Pekerja'); XLSX.utils.book_append_sheet(wb, info, 'Panduan');
+  XLSX.writeFile(wb, `Templat_Pekerja_${S.company.code}.xlsx`);
+}
+const impDate = (v) => {
+  if (v == null || v === '') return '';
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const t = String(v).trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return null;
+};
+function impRow(r) {
+  const g = (k) => { const v = r[k]; return v == null ? '' : (typeof v === 'string' ? v.trim() : v); };
+  const err = [];
+  const name = String(g('name') || '');
+  if (!name) err.push(L('Nama kosong', 'Name empty'));
+  const pt = String(g('payType') || 'Bulanan').toLowerCase();
+  const payType = /hari|daily/.test(pt) ? 'daily' : /jam|hour/.test(pt) ? 'hourly' : 'monthly';
+  const nat = String(g('nationality') || 'Warganegara').toLowerCase();
+  const nationality = /asing|foreign/.test(nat) ? 'foreign' : /pr|tetap|permanent/.test(nat) ? 'pr' : 'citizen';
+  const dob = impDate(g('dob')), startDate = impDate(g('startDate'));
+  if (dob === null) err.push(L('Tarikh lahir tidak sah', 'Invalid date of birth'));
+  if (startDate === null) err.push(L('Tarikh mula tidak sah', 'Invalid start date'));
+  const salary = Number(String(g('salary') || 0).toString().replace(/[^\d.]/g, '')) || 0;
+  const allowances = [['a1n', 'a1v'], ['a2n', 'a2v']].map(([n, v]) => ({ name: String(g(n) || ''), amount: Number(g(v) || 0) })).filter(a => a.name && a.amount > 0).map(a => ({ ...a, type: 'monthly' }));
+  return {
+    err, data: {
+      name, ic: String(g('ic') || ''), phone: String(g('phone') || ''), email: String(g('email') || ''), dob: dob || '',
+      position: String(g('position') || ''), dept: String(g('dept') || ''), branchId: null, startDate: startDate || '',
+      payType, salary, nationality, bank: String(g('bank') || ''), bankAcc: String(g('bankAcc') || ''), epfNo: String(g('epfNo') || ''),
+      socsoNo: String(g('socsoNo') || ''), taxNo: String(g('taxNo') || ''), allowances, deductions: [], defaultShift: '', workDays: [],
+      leaveEntitle: {}, leaveCarry: {}, statutory: {}
+    }
+  };
+}
+function importWorkers() {
+  let rows = [];
+  const m = modal({
+    title: L('Import Pekerja dari Excel', 'Import Staff from Excel'), wide: true,
+    body: `
+      <ol class="small" style="padding-left:1.2rem;line-height:1.7">
+        <li>${L('Muat turun templat & isi satu baris seorang pekerja.', 'Download the template & fill one row per staff member.')} <button type="button" class="btn btn-sm btn-soft" id="impTpl">${icon('dl', 16)} ${L('Templat Excel', 'Excel template')}</button></li>
+        <li>${L('Pilih fail yang sudah diisi. Semak pratonton.', 'Choose the filled file. Check the preview.')}</li>
+        <li>${L('Tekan Import. ID & PIN dijana automatik — muat turun senarai untuk diberi kepada pekerja.', 'Press Import. IDs & PINs are generated — download the list to give to staff.')}</li>
+      </ol>
+      <input type="file" class="input" id="impFile" accept=".xlsx,.xls,.csv">
+      <div id="impPrev" style="margin-top:.8rem"></div>`,
+    actions: [{ label: L('Tutup', 'Close') }, { label: L('Import', 'Import'), cls: 'btn-primary', autoClose: false, onClick: () => { run(); return false; } }]
+  });
+  const el = m.el;
+  $('#impTpl', el).onclick = impTemplate;
+  $('#impFile', el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!window.XLSX) return toast(L('Modul Excel belum dimuatkan.', 'Excel module not loaded.'), 'warn');
+    try {
+      const wb = XLSX.read(await f.arrayBuffer(), { cellDates: true });
+      const sh = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', raw: true });
+      const head = (aoa[0] || []).map(h => String(h).trim().toLowerCase());
+      const idx = IMP_COLS.map(([k, label]) => [k, head.indexOf(label.toLowerCase())]);
+      if (idx.find(([k]) => k === 'name')[1] < 0) { $('#impPrev', el).innerHTML = `<div class="empty small">${L('Lajur "Nama *" tidak dijumpai. Guna templat yang disediakan.', 'Column "Nama *" not found. Use the provided template.')}</div>`; return; }
+      rows = aoa.slice(1).filter(r => r.some(v => String(v).trim() !== '')).map(r => impRow(Object.fromEntries(idx.filter(([, i]) => i >= 0).map(([k, i]) => [k, r[i]]))));
+      const bad = rows.filter(r => r.err.length).length;
+      $('#impPrev', el).innerHTML = `<p class="small"><b>${rows.length}</b> ${L('pekerja dijumpai', 'staff found')}${bad ? ` · <span style="color:var(--bad)">${bad} ${L('ada ralat (tidak diimport)', 'with errors (skipped)')}</span>` : ''}</p>
+        <div class="table-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th>#</th><th>${L('Nama', 'Name')}</th><th>${L('Jawatan', 'Position')}</th><th>${L('Gaji', 'Pay')}</th><th>${L('Status', 'Status')}</th><th></th></tr></thead><tbody>
+        ${rows.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.data.name || '-')}</b><div class="xs muted">${esc(r.data.ic)}</div></td><td class="small">${esc(r.data.position)}</td>
+          <td class="small">${money(r.data.salary)} · ${esc(PAY_TYPES().find(p => p[0] === r.data.payType)[1])}</td><td class="small">${esc({ citizen: L('Warganegara', 'Citizen'), pr: 'PR', foreign: L('Asing', 'Foreign') }[r.data.nationality])}</td>
+          <td class="small">${r.err.length ? `<span style="color:var(--bad)">${esc(r.err.join(', '))}</span>` : '✓'}</td></tr>`).join('')}</tbody></table></div>`;
+    } catch (err) { console.error(err); $('#impPrev', el).innerHTML = `<div class="empty small">${L('Fail tidak dapat dibaca.', 'Could not read the file.')}</div>`; }
+  };
+  const run = async () => {
+    const ok = rows.filter(r => !r.err.length);
+    if (!ok.length) return toast(L('Pilih fail dengan sekurang-kurangnya seorang pekerja.', 'Choose a file with at least one staff member.'), 'warn');
+    if (!await confirmBox(L(`Import ${ok.length} pekerja? Akaun log masuk akan dibuka untuk setiap pekerja.`, `Import ${ok.length} staff? A login account will be created for each.`))) return;
+    const prev = $('#impPrev', el);
+    const out = [];
+    try {
+      const seq0 = await runTransaction(db, async tx => { const s = await tx.get(cRef()); const n = s.data().seq || 0; tx.update(cRef(), { seq: n + ok.length }); return n; });
+      const sa = getSecAuth();
+      for (let i = 0; i < ok.length; i++) {
+        const d = ok[i].data, wid = `${S.company.code}${String(seq0 + i + 1).padStart(3, '0')}`, pin = randPin();
+        prev.innerHTML = `<p class="small"><span class="spin"></span> ${L('Membuka akaun', 'Creating accounts')} ${i + 1} / ${ok.length} — ${esc(d.name)}</p>`;
+        try {
+          const cred = await createUserWithEmailAndPassword(sa, workerEmail(wid), pin);
+          await signOut(sa).catch(() => {});
+          const b = writeBatch(db);
+          b.set(doc(db, 'users', cred.user.uid), { role: 'worker', cid: S.cid, workerId: wid, createdAt: serverTimestamp() });
+          b.set(doc(db, 'companies', S.cid, 'workers', wid), { ...d, uid: cred.user.uid, active: true, mustChangePin: true, deviceId: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+          b.update(cRef(), { workerCount: increment(1) });
+          await b.commitFull();
+          out.push({ wid, pin, name: d.name, phone: d.phone, ok: true });
+        } catch (err) {
+          console.error(err);
+          out.push({ wid, pin: '', name: d.name, phone: d.phone, ok: false, err: authErr(err) });
+          if (err.code === 'auth/too-many-requests') { toast(L('Terlalu banyak akaun dibuka serentak. Cuba baki selepas 1 jam.', 'Too many accounts at once. Try the rest after 1 hour.'), 'warn', 8000); break; }
+        }
+      }
+      logAct('worker.import', `${out.filter(o => o.ok).length} staff`);
+    } catch (err) { toast(authErr(err), 'bad'); }
+    const good = out.filter(o => o.ok);
+    prev.innerHTML = `<p><b>${good.length}</b> ${L('pekerja berjaya diimport', 'staff imported')}${out.length - good.length ? ` · <span style="color:var(--bad)">${out.length - good.length} ${L('gagal', 'failed')}</span>` : ''}.</p>
+      <p class="small muted">${L('Muat turun senarai ID & PIN sekarang — PIN tidak boleh dilihat semula (boleh reset kemudian).', 'Download the ID & PIN list now — PINs cannot be viewed again (can be reset later).')}</p>
+      <button type="button" class="btn btn-primary" id="impDl">${icon('dl', 16)} ${L('Muat turun ID & PIN', 'Download IDs & PINs')}</button>`;
+    $('#impDl', el).onclick = () => {
+      const aoa = [[S.company.name], [L('Akaun pekerja — log masuk di ', 'Staff accounts — log in at ') + location.origin + '/worker'], [], ['ID', L('Nama', 'Name'), L('Telefon', 'Phone'), L('PIN sementara', 'Temporary PIN'), L('Status', 'Status')],
+        ...out.map(o => [o.ok ? o.wid : '', o.name, o.phone, o.pin, o.ok ? 'OK' : (o.err || 'Gagal')])];
+      const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 10 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'ID & PIN'); XLSX.writeFile(wb, `Akaun_Pekerja_${S.company.code}.xlsx`);
+    };
+    rows = [];
   };
 }

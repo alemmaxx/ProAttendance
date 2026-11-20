@@ -64,6 +64,7 @@ function renderLogin() {
       <div class="divider"></div>
       <p class="center small"><a href="/admin.html" data-ms="Log masuk Majikan / Admin" data-en="Employer / Admin login"></a></p>
       <div class="center" style="margin-top:.6rem">${installBtn('btn btn-soft btn-sm')}</div>
+      <p class="center xs" style="margin-top:.6rem"><a href="/privasi.html" target="_blank">${L('Notis Privasi', 'Privacy Notice')}</a></p>
     </form>
   </div>`;
   applyLang();
@@ -103,6 +104,29 @@ function renderLogin() {
     }
   };
   if ($('#pkLogin')) { $('#pkLogin').onclick = (e) => passkeyLogin(e.currentTarget); pkPrep('auth'); }
+}
+
+// ---------------------------------------------------------------- PERSETUJUAN PDPA (kali pertama)
+function pdpaConsent() {
+  return new Promise(res => {
+    const m = modal({
+      title: L('Notis Privasi', 'Privacy Notice'), closable: false,
+      body: `<p class="small">${L(`<b>${esc(S.company.name)}</b> menggunakan ProAttendance untuk merekod kehadiran, cuti, tuntutan dan gaji anda.`, `<b>${esc(S.company.name)}</b> uses ProAttendance to record your attendance, leave, claims and pay.`)}</p>
+        <ul class="small" style="padding-left:1.1rem;line-height:1.6">
+          <li>${L('<b>Lokasi GPS</b> direkod hanya semasa punch & Update Kerja — bukan penjejakan berterusan.', '<b>GPS location</b> is recorded only when punching & sending a Work Update — not continuous tracking.')}</li>
+          <li>${L('<b>Swafoto</b> semasa punch (jika diaktifkan majikan).', '<b>Selfie</b> when punching (if enabled by your employer).')}</li>
+          <li>${L('Data gaji, cuti & tuntutan hanya dilihat oleh majikan anda & anda sendiri. Tidak dijual.', 'Pay, leave & claim data is seen only by your employer & you. Never sold.')}</li>
+        </ul>
+        <p class="small"><a href="/privasi.html" target="_blank">${L('Baca Notis Privasi penuh', 'Read the full Privacy Notice')} →</a></p>`,
+      actions: [
+        { label: L('Tidak setuju', 'Decline'), onClick: async () => { res(false); await signOut(auth); } },
+        { label: L('Saya Setuju', 'I Agree'), cls: 'btn-primary', onClick: async () => {
+          try { await updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), { pdpaAt: serverTimestamp(), pdpaVer: '2026-11' }); S.worker.pdpaAt = true; } catch {}
+          res(true);
+        } }
+      ]
+    });
+  });
 }
 
 // ---------------------------------------------------------------- CAP JARI / FACE ID (passkey)
@@ -204,6 +228,7 @@ onAuthStateChanged(auth, async (u) => {
     updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), upd).catch(() => {});
 
     await Promise.all([loadToday(), loadMeta()]);
+    if (!S.worker.pdpaAt) { const ok = await pdpaConsent(); if (!ok) return; }
     renderShell();
     refreshPush(S.cid, S.user.uid, { role: 'worker', workerId: S.me.workerId });
     if (S.worker.mustChangePin) forcePinChange();
