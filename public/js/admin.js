@@ -13,7 +13,7 @@ import {
 } from './fs.js';
 import {
   $, $$, L, esc, toast, modal, confirmBox, busy, applyLang, langBtn, keepInputs, installBtn, todayStr, fmtTime, fmtDate, fmtDateTime, toDate,
-  minsToHM, dayName, addDays, summarizeDay, TYPE_LABEL, METHOD_LABEL, getPosition, mapLink, applyBrand, logoHtml,
+  minsToHM, dayName, addDays, summarizeDay, TYPE_LABEL, METHOD_LABEL, getPosition, mapLink, applyBrand, logoHtml, haversine,
   isExpired, daysLeft, randPin, randSecret, money, copyText, authErr, icon, fileToDataURL
 } from './ui.js';
 import {
@@ -1038,12 +1038,49 @@ function viewReports() {
       <button class="btn btn-primary" id="rgo">${icon('chart', 18)} ${L('Jana Laporan', 'Generate')}</button>
       <button class="btn btn-ghost" id="rxl" disabled>${icon('dl', 18)} Excel</button>
       <button class="btn btn-ghost" id="rpr" disabled>${icon('print', 18)} ${L('Cetak / PDF', 'Print / PDF')}</button>
+      <button class="btn btn-soft" id="rTrail">${icon('pin', 18)} ${L('Jejak Lokasi', 'Location Trail')}</button>
     </div>
   </div>
   <div class="card" id="rOut" style="margin-top:1rem"><div class="empty">${L('Pilih tarikh dan tekan "Jana Laporan".', 'Choose dates and tap "Generate".')}</div></div>`;
   $('#rgo').onclick = genReport;
+  $('#rTrail').onclick = () => trailView($('#rw').value, $('#rt').value || t);
   $('#rpr').onclick = () => window.print();
   if (wsel) genReport();
+}
+
+// ---------------------------------------------------------------- JEJAK LOKASI (punch + jejak 2 jam + update kerja)
+async function trailView(wid0, date0) {
+  const m = modal({
+    title: L('Jejak Lokasi Pekerja', 'Staff Location Trail'), wide: true,
+    body: `<div class="grid2" style="align-items:end"><div class="field"><label class="lbl">${L('Pekerja', 'Staff')}</label><select class="input" id="tw">${S.workers.map(w => `<option value="${esc(w.id)}" ${w.id === wid0 ? 'selected' : ''}>${esc(w.id)} · ${esc(w.name)}</option>`).join('')}</select></div>
+      <div class="field"><label class="lbl">${L('Tarikh', 'Date')}</label><input class="input" type="date" id="td" value="${esc(date0 || todayStr())}" max="${todayStr()}"></div></div>
+      <div id="tOut"></div>`,
+    actions: [{ label: L('Tutup', 'Close') }]
+  });
+  const el = m.el;
+  const draw = async () => {
+    const wid = $('#tw', el).value, d = $('#td', el).value; if (!wid || !d) return;
+    $('#tOut', el).innerHTML = `<div class="loader" style="min-height:90px"><span class="spin"></span></div>`;
+    try {
+      const [a, tr] = await Promise.all([
+        getDocs(query(sub('attendance'), where('workerId', '==', wid), where('date', '==', d))).catch(() => getDocs(query(sub('attendance'), where('date', '==', d)))),
+        getDocs(query(sub('trail'), where('workerId', '==', wid), where('date', '==', d))).catch(() => getDocs(query(sub('trail'), where('date', '==', d))))
+      ]);
+      const pts = [
+        ...a.docs.map(x => x.data()).filter(r => r.workerId === wid).map(r => ({ t: toDate(r.ts) || new Date(r.clientTs || 0), lat: r.lat, lng: r.lng, what: TYPE_LABEL[r.type] ? TYPE_LABEL[r.type]() : r.type, place: r.type === 'visit' ? [r.locName, r.note].filter(Boolean).join(' — ') : (r.locName || ''), auto: r.auto })),
+        ...tr.docs.map(x => x.data()).filter(r => r.workerId === wid).map(r => ({ t: toDate(r.ts) || new Date(r.clientTs || 0), lat: r.lat, lng: r.lng, what: L('Jejak 2 jam', '2-hour trail'), place: r.place || '' }))
+      ].sort((x, y) => x.t - y.t);
+      let km = 0, prev = null;
+      pts.forEach(p => { if (p.lat != null && prev) km += haversine(prev.lat, prev.lng, p.lat, p.lng) / 1000; if (p.lat != null) prev = p; });
+      $('#tOut', el).innerHTML = pts.length ? `<p class="small muted">${pts.length} ${L('titik', 'points')} · ${L('anggaran jarak garis lurus', 'approx. straight-line distance')} <b>${km.toFixed(1)} km</b></p>
+        <div class="table-wrap"><table><thead><tr><th>${L('Masa', 'Time')}</th><th>${L('Rekod', 'Record')}</th><th>${L('Tempat', 'Place')}</th><th></th></tr></thead><tbody>
+        ${pts.map(p => `<tr><td class="mono">${fmtTime(p.t)}</td><td class="small">${esc(p.what)}${p.auto ? ' <span class="badge b-warn">AUTO</span>' : ''}</td><td class="small">${esc(p.place || '-')}</td>
+          <td class="right">${p.lat != null ? `<a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${p.lat},${p.lng}">${icon('pin', 14)} ${L('Peta', 'Map')}</a>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty small">${L('Tiada rekod lokasi pada tarikh ini.', 'No location records on this date.')}</div>`;
+    } catch (e) { $('#tOut', el).innerHTML = `<div class="empty small">${esc(authErr(e))}</div>`; }
+  };
+  $('#tw', el).onchange = draw; $('#td', el).onchange = draw;
+  draw();
 }
 
 let REPORT = null;
@@ -1244,6 +1281,11 @@ function viewSettings() {
       <div class="field"><label class="lbl">${L('OT minimum (minit)', 'Minimum OT (minutes)')}</label><input class="input" type="number" min="0" id="wOm" value="${st.otMin ?? 30}"></div>
       <div class="field"><label class="lbl">${L('Bundar ke bawah setiap (minit)', 'Round down to every (minutes)')}</label><input class="input" type="number" min="1" id="wOr" value="${st.otRound ?? 15}"></div>
     </div>
+    <div class="set-row"><div><b>${L('Tamat kerja automatik', 'Automatic clock-out')}</b><div class="small muted">${L('Pekerja yang lupa tekan Tamat Kerja dikeluarkan automatik pada waktu tamat syif (ditanda AUTO; pekerja dapat notifikasi & boleh mohon pembetulan jika masih bekerja). Mula Kerja tetap manual.', 'Staff who forget to tap End Work are clocked out automatically at shift end (marked AUTO; they get a notification & can request a fix if still working). Start Work stays manual.')}</div></div>
+      <label class="switch"><input type="checkbox" id="tAOut" ${st.autoOut !== false ? 'checked' : ''}><span></span></label></div>
+    <div class="field" style="max-width:320px"><label class="lbl">${L('Semak selepas tamat syif (minit)', 'Check after shift end (minutes)')}</label><input class="input" type="number" min="0" max="240" id="wAOut" value="${st.autoOutAfter ?? 30}"></div>
+    <div class="set-row"><div><b>${L('Jejak lokasi waktu kerja', 'Work-hours location trail')}</b><div class="small muted">${L('Semasa bekerja (bukan rehat), lokasi pekerja direkod lebih kurang setiap 2 jam bila app dibuka — hanya jika berpindah lebih 100 m. Pekerja dapat notifikasi peringatan. Berguna untuk rekod tapak & tuntutan perjalanan. Tiada rekod di luar waktu kerja.', 'While working (not on break), staff location is recorded about every 2 hours when the app is open — only if they moved more than 100 m. Staff get a reminder notification. Useful for site records & travel claims. Nothing is recorded outside working hours.')}</div></div>
+      <label class="switch"><input type="checkbox" id="tTrail" ${st.trail ? 'checked' : ''}><span></span></label></div>
     <h3 style="margin-top:.6rem">${L('Tetapan Clock-in', 'Clock-in Settings')}</h3>
     <div class="set-row"><div><b>${L('Selfie wajib semasa punch', 'Selfie required when punching')}</b><div class="small muted">${L('Gambar disimpan sebagai bukti (tanpa pengecaman wajah).', 'Photo kept as proof (no face recognition).')}</div></div>
       <label class="switch"><input type="checkbox" id="tSelfie" ${st.selfie !== false ? 'checked' : ''}><span></span></label></div>
@@ -1356,6 +1398,7 @@ function viewSettings() {
         'settings.grace': Number($('#wG').value || 0),
         'settings.autoBreak': $('#tABrk').checked, 'settings.breakStart': $('#wBs').value || '', 'settings.breakEnd': $('#wBe').value || '',
         'settings.autoOT': $('#tAOT').checked, 'settings.otMin': Number($('#wOm').value || 0), 'settings.otRound': Math.max(1, Number($('#wOr').value || 15)),
+        'settings.autoOut': $('#tAOut').checked, 'settings.autoOutAfter': Math.max(0, Number($('#wAOut').value || 0)), 'settings.trail': $('#tTrail').checked,
         'settings.workDays': $$('[data-wd]').filter(x => x.checked).map(x => Number(x.dataset.wd)),
         'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked
       });

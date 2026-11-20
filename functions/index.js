@@ -414,3 +414,81 @@ exports.pa_expiryReminder = onSchedule({ schedule: 'every day 09:00', timeZone: 
     await sendTo(d.id, full, left > 0 ? `⏰ ${left} hari lagi` : '⚠️ Langganan tamat hari ini', body, '/');
   }));
 });
+
+
+// ================================================================ AUTO TAMAT KERJA & PERINGATAN JEJAK LOKASI
+// Setiap 15 minit. (1) Pekerja yang lupa tekan Tamat Kerja dikeluarkan automatik pada waktu tamat syif.
+// (2) Jika jejak lokasi diaktifkan: pekerja yang sedang bekerja & tiada kemas kini lokasi > 2 jam dapat notifikasi.
+const KL = 8 * 3600000;                                            // UTC+8
+const klDate = (ms) => new Date(ms + KL).toISOString().slice(0, 10);
+const klMs = (date, hm) => Date.parse(`${date}T${hm || '00:00'}:00Z`) - KL;
+const hmOf = (ms) => new Date(ms + KL).toISOString().slice(11, 16);
+function shiftFor(c, w, date, rosterVal) {
+  const st = c.settings || {}, T = c.shiftTemplates || [];
+  const byId = (id) => T.find(t => t.id === id);
+  const hols = new Set((c.holidays || []).map(h => h.date));
+  if (rosterVal === 'off') return null;
+  if (rosterVal && byId(rosterVal)) return byId(rosterVal);
+  if (hols.has(date)) return null;
+  const dow = new Date(date + 'T00:00:00Z').getUTCDay();
+  const days = Array.isArray(w.workDays) && w.workDays.length ? w.workDays : (st.workDays || [1, 2, 3, 4, 5]);
+  if (!days.includes(dow)) return null;
+  return (w.defaultShift && byId(w.defaultShift)) || { start: st.workStart || '09:00', end: st.workEnd || '18:00', bStart: st.breakStart, bEnd: st.breakEnd };
+}
+exports.pa_attendanceWatch = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Asia/Kuala_Lumpur', region: REGION }, async () => {
+  const now = Date.now(), today = klDate(now), yest = klDate(now - 86400000);
+  const cos = await db.collection('companies').where('status', 'in', ['trial', 'active']).get();
+  for (const cd of cos.docs) {
+    const c = cd.data(), st = c.settings || {};
+    if (c.expiry && c.expiry.toMillis() < now) continue;
+    const autoOut = st.autoOut !== false, trail = !!st.trail;
+    if (!autoOut && !trail) continue;
+    const cid = cd.id;
+    const att = await db.collection(`companies/${cid}/attendance`).where('date', 'in', [yest, today]).get();
+    if (att.empty) continue;
+    // Kumpul ikut pekerja + tarikh sesi
+    const ses = {};
+    att.docs.forEach(d => { const r = d.data(); if (!r.ts || r.type === 'visit') return; const k = `${r.workerId}|${r.date}`; (ses[k] = ses[k] || []).push({ ...r, _t: r.ts.toMillis() }); });
+    const open = Object.entries(ses).map(([k, rs]) => { rs.sort((a, b) => a._t - b._t); return { k, rs, last: rs[rs.length - 1] }; }).filter(x => x.last.type !== 'out');
+    if (!open.length) continue;
+    const rosterCache = {}, workerCache = {};
+    const roster = async (date) => rosterCache[date] ??= ((await db.doc(`companies/${cid}/roster/${date}`).get()).data()?.a || {});
+    const worker = async (wid) => workerCache[wid] ??= ((await db.doc(`companies/${cid}/workers/${wid}`).get()).data() || null);
+    let trailLast = null;
+    for (const { rs, last } of open) {
+      const wid = last.workerId, date = last.date, w = await worker(wid);
+      if (!w || w.active === false) continue;
+      const sh = shiftFor(c, w, date, (await roster(date))[wid]);
+      const firstIn = rs.find(r => r.type === 'in');
+      // Waktu tamat: tamat syif (merentas hari jika perlu); hari tanpa syif: 12 jam selepas masuk
+      let endMs;
+      if (sh) { endMs = klMs(date, sh.end); if (sh.end <= sh.start) endMs += 86400000; }
+      else endMs = (firstIn?._t || last._t) + 12 * 3600000;
+      // Masuk semula selepas waktu tamat (OT malam): beri 4 jam dari masuk semula
+      const lastIn = [...rs].reverse().find(r => r.type === 'in');
+      if (lastIn && lastIn._t >= endMs) endMs = lastIn._t + 4 * 3600000;
+      const delay = Number(st.autoOutAfter ?? 30) * 60000;
+      if (autoOut && now >= endMs + delay) {
+        const b = db.batch();
+        if (last.type === 'break_in') b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'break_out', date, ts: Timestamp.fromMillis(Math.max(last._t, endMs - 60000)), method: 'auto', auto: true, lat: null, lng: null, deviceId: null, dept: w.dept || '' });
+        b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'out', date, ts: Timestamp.fromMillis(Math.max(last._t + 60000, endMs)), method: 'auto', auto: true, lat: null, lng: null, acc: null, deviceId: null, dept: w.dept || '', lid: null, locName: '', hasSelfie: false });
+        await b.commit();
+        await sendTo(cid, t => t.id === last.uid, 'Tamat kerja automatik', `Anda dikeluarkan automatik pada ${hmOf(Math.max(last._t + 60000, endMs))} kerana terlupa tekan Tamat Kerja. Jika masih bekerja / OT, mohon Pembetulan Punch.`, '/worker');
+        continue;
+      }
+      // Peringatan jejak lokasi (hanya dalam waktu kerja, bukan semasa rehat)
+      if (trail && now < endMs && last.type !== 'break_in') {
+        if (sh?.bStart && sh?.bEnd) { const bs = klMs(date, sh.bStart), be = klMs(date, sh.bEnd); if (now >= bs && now < be) continue; }
+        if (!trailLast) {
+          trailLast = {};
+          const tr = await db.collection(`companies/${cid}/trail`).where('date', 'in', [yest, today]).get();
+          tr.docs.forEach(d => { const x = d.data(); const k = x.workerId; trailLast[k] = Math.max(trailLast[k] || 0, x.ts?.toMillis?.() || 0, x.checkedAt || 0); });
+        }
+        const lastSeen = Math.max(trailLast[wid] || 0, last._t);
+        if (now - lastSeen >= 2 * 3600000 && now - lastSeen < 2 * 3600000 + 15 * 60000) {
+          await sendTo(cid, t => t.id === last.uid, '📍 Kemas kini lokasi', 'Buka app sebentar untuk merekod lokasi kerja anda (untuk rekod & tuntutan perjalanan).', '/worker');
+        }
+      }
+    }
+  }
+});

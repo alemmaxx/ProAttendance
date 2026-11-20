@@ -196,14 +196,15 @@ export const TYPE_LABEL = {
   out: () => L('Keluar', 'Clock Out'),
   break_in: () => L('Mula Rehat', 'Break Start'),
   break_out: () => L('Tamat Rehat', 'Break End'),
-  visit: () => L('Lawatan Tapak', 'Site Visit')
+  visit: () => L('Update Kerja', 'Work Update')
 };
 export const METHOD_LABEL = {
   button: () => L('Butang', 'Button'),
   gps: () => 'GPS',
   qr: () => 'QR',
   fix: () => L('Pembetulan', 'Correction'),
-  kiosk: () => 'Kiosk'
+  kiosk: () => 'Kiosk',
+  auto: () => L('Automatik (lupa tamat kerja)', 'Automatic (forgot to clock out)')
 };
 
 // ---------- Lokasi ----------

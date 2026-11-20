@@ -107,6 +107,66 @@ function renderLogin() {
   if ($('#pkLogin')) { $('#pkLogin').onclick = (e) => passkeyLogin(e.currentTarget); pkPrep('auth'); }
 }
 
+// ---------------------------------------------------------------- JEJAK LOKASI WAKTU KERJA
+// Jika majikan mengaktifkan: semasa bekerja (bukan rehat), lokasi direkod lebih kurang setiap 2 jam
+// bila app dibuka — hanya jika berpindah ≥ 100 m. Tiada rekod di luar waktu kerja.
+const TRAIL_EVERY = 2 * 3600000, TRAIL_MIN_M = 100;
+const recMs = (r) => toDate(r.ts)?.getTime() || r.clientTs || 0;
+function trailState() { try { return JSON.parse(localStorage.getItem('pa_trail_' + S.me.workerId) || 'null'); } catch { return null; } }
+function trailSave(o) { try { localStorage.setItem('pa_trail_' + S.me.workerId, JSON.stringify(o)); } catch {} }
+function workingNow() {
+  const st = S.company?.settings || {};
+  if (!st.trail || isExpired(S.company)) return false;
+  const recs = (S.today || []).filter(r => r.type !== 'visit');
+  const last = recs[recs.length - 1];
+  if (!last || last.type === 'out' || last.type === 'break_in') return false;
+  if (st.autoBreak) {
+    const inf = dayInfo(S.sessionDate), bs = inf.shift?.bStart || st.breakStart, be = inf.shift?.bEnd || st.breakEnd;
+    const hm = new Date().toTimeString().slice(0, 5);
+    if (bs && be && hm >= bs && hm < be) return false;              // waktu rehat automatik
+  }
+  return true;
+}
+async function placeName(lat, lng) {
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=${lat}&lon=${lng}&accept-language=ms,en`, { headers: { Accept: 'application/json' } });
+    const j = await r.json(), a = j.address || {};
+    return ([a.amenity || a.building || a.shop || a.office, a.road || a.neighbourhood || a.suburb, a.city || a.town || a.village || a.county].filter(Boolean).join(', ') || j.display_name || '').slice(0, 120);
+  } catch { return ''; }
+}
+async function trailTick(force = false) {
+  if (S._trailBusy || !workingNow()) return;
+  const now = Date.now();
+  let st = trailState();
+  if (!st || st.date !== S.sessionDate) {
+    const inRec = (S.today || []).find(r => r.type === 'in');
+    st = { date: S.sessionDate, ts: inRec ? recMs(inRec) : now, lat: inRec?.lat ?? null, lng: inRec?.lng ?? null };
+    trailSave(st);
+  }
+  if (!force && now - st.ts < TRAIL_EVERY) return;
+  S._trailBusy = true;
+  try {
+    const pos = await getPosition(15000);
+    const moved = st.lat == null || haversine(st.lat, st.lng, pos.lat, pos.lng) >= TRAIL_MIN_M;
+    if (moved) {
+      const place = await placeName(pos.lat, pos.lng);
+      await addDoc(collection(db, 'companies', S.cid, 'trail'), { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date: S.sessionDate, ts: serverTimestamp(), clientTs: now, lat: pos.lat, lng: pos.lng, acc: pos.acc ?? null, place });
+    }
+    trailSave({ date: S.sessionDate, ts: now, lat: moved ? pos.lat : st.lat, lng: moved ? pos.lng : st.lng });
+  } catch {} finally { S._trailBusy = false; }
+}
+// Gabung punch + jejak + update kerja untuk satu tarikh, ikut masa
+async function loadTrail(d, recs) {
+  try {
+    if (!recs) recs = (await getDocs(query(collection(db, 'companies', S.cid, 'attendance'), where('uid', '==', S.user.uid), where('date', '==', d)))).docs.map(x => x.data({ serverTimestamps: 'estimate' }));
+    const tr = (await getDocs(query(collection(db, 'companies', S.cid, 'trail'), where('uid', '==', S.user.uid), where('date', '==', d)))).docs.map(x => x.data({ serverTimestamps: 'estimate' }));
+    return [
+      ...recs.filter(r => r.type === 'in' || r.type === 'out' || r.type === 'visit').map(r => ({ t: new Date(recMs(r)), lat: r.lat ?? null, lng: r.lng ?? null, n: r.type === 'visit' ? r.locName : `${TYPE_LABEL[r.type]()}${r.locName ? ' · ' + r.locName : ''}`, auto: r.auto })),
+      ...tr.map(r => ({ t: new Date(recMs(r)), lat: r.lat, lng: r.lng, n: r.place || '' }))
+    ].sort((a, b) => a.t - b.t);
+  } catch { return []; }
+}
+
 // ---------------------------------------------------------------- PERSETUJUAN PDPA (kali pertama)
 function pdpaConsent() {
   return new Promise(res => {
@@ -114,7 +174,8 @@ function pdpaConsent() {
       title: L('Notis Privasi', 'Privacy Notice'), closable: false,
       body: `<p class="small">${L(`<b>${esc(S.company.name)}</b> menggunakan ProAttendance untuk merekod kehadiran, cuti, tuntutan dan gaji anda.`, `<b>${esc(S.company.name)}</b> uses ProAttendance to record your attendance, leave, claims and pay.`)}</p>
         <ul class="small" style="padding-left:1.1rem;line-height:1.6">
-          <li>${L('<b>Lokasi GPS</b> direkod hanya semasa punch & Update Kerja — bukan penjejakan berterusan.', '<b>GPS location</b> is recorded only when punching & sending a Work Update — not continuous tracking.')}</li>
+          <li>${L('<b>Lokasi GPS</b> direkod semasa punch & Update Kerja.', '<b>GPS location</b> is recorded when punching & sending a Work Update.')}</li>
+          ${S.company.settings?.trail ? `<li>${L('Majikan anda mengaktifkan <b>jejak lokasi waktu kerja</b>: lokasi direkod lebih kurang setiap 2 jam semasa bekerja (bukan semasa rehat, tidak selepas tamat kerja), hanya jika anda berpindah lebih 100 m. Ia membantu rekod tapak & tuntutan perjalanan anda.', 'Your employer has turned on the <b>work-hours location trail</b>: your location is recorded about every 2 hours while working (not on break, not after work), only if you moved more than 100 m. It helps your site records & travel claims.')}</li>` : ''}
           <li>${L('<b>Swafoto</b> semasa punch (jika diaktifkan majikan).', '<b>Selfie</b> when punching (if enabled by your employer).')}</li>
           <li>${L('Data gaji, cuti & tuntutan hanya dilihat oleh majikan anda & anda sendiri. Tidak dijual.', 'Pay, leave & claim data is seen only by your employer & you. Never sold.')}</li>
         </ul>
@@ -122,7 +183,7 @@ function pdpaConsent() {
       actions: [
         { label: L('Tidak setuju', 'Decline'), onClick: async () => { res(false); await signOut(auth); } },
         { label: L('Saya Setuju', 'I Agree'), cls: 'btn-primary', onClick: async () => {
-          try { await updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), { pdpaAt: serverTimestamp(), pdpaVer: '2026-11' }); S.worker.pdpaAt = true; } catch {}
+          try { await updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), { pdpaAt: serverTimestamp(), pdpaVer: '2026-11b' }); S.worker.pdpaAt = true; } catch {}
           res(true);
         } }
       ]
@@ -229,7 +290,7 @@ onAuthStateChanged(auth, async (u) => {
     updateDoc(doc(db, 'companies', S.cid, 'workers', S.me.workerId), upd).catch(() => {});
 
     await Promise.all([loadToday(), loadMeta()]);
-    if (!S.worker.pdpaAt) { const ok = await pdpaConsent(); if (!ok) return; }
+    if (!S.worker.pdpaAt || (S.company.settings?.trail && S.worker.pdpaVer !== '2026-11b')) { const ok = await pdpaConsent(); if (!ok) return; }
     renderShell();
     refreshPush(S.cid, S.user.uid, { role: 'worker', workerId: S.me.workerId });
     if (S.worker.mustChangePin) forcePinChange();
@@ -340,6 +401,12 @@ function renderShell() {
   if (!$('#helpFab')) { const f = document.createElement('button'); f.id = 'helpFab'; f.className = 'help-fab'; f.type = 'button'; f.setAttribute('aria-label', 'Manual'); f.textContent = '?'; f.onclick = () => manualModal('worker', ({ home: 1, rekod: 2, mohon: 4, berita: 6, profil: 6 })[S.tab] ?? 0); document.body.appendChild(f); }
   go(S.tab);
   setTimeout(offerPasskey, 1500);
+  // Jejak lokasi: semak bila app dibuka / kembali ke skrin, dan setiap 5 minit semasa dibuka
+  if (!S._trailTimer) {
+    S._trailTimer = setInterval(() => trailTick(), 5 * 60000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') trailTick(); });
+  }
+  setTimeout(() => trailTick(), 4000);
 }
 document.addEventListener('langchange', () => { if (S.worker && $('#view')) renderShell(); else if ($('.login-wrap')) keepInputs(renderLogin); });
 
@@ -750,6 +817,7 @@ async function openDay(d, recs) {
   const inf = dayInfo(d), lvReq = leaveDateMap(S.reqs)[d], holName = holidayMap(S.company)[d];
   const punches = recs.filter(r => r.type !== 'visit'), visits = recs.filter(r => r.type === 'visit');
   const sm = punches.length ? summarizeDay(punches, lateSettings(S.company, inf), d) : null;
+  const trail = await loadTrail(d, recs);
   const claims = [];
   const mc = S.claims?.[d.slice(0, 7)], CR = claimRates(S.company);
   if (mc) {
@@ -768,6 +836,7 @@ async function openDay(d, recs) {
         + row(L('Jam kerja', 'Hours'), minsToHM(sm.workMin)) + row(L('Rehat', 'Break'), sm.breakMin >= 1 ? Math.round(sm.breakMin) + 'm' + (sm.autoBreak ? ' (auto)' : '') : '')
         + row(L('Lewat', 'Late'), sm.lateMin ? sm.lateMin + 'm' : '') : (d <= t && inf.type === 'work' && !lvReq ? row(L('Status', 'Status'), `<span class="badge b-bad">${L('Tiada punch', 'No punch')}</span>`) : '')}
       ${visits.length ? `<div class="sec-title">${L('Lawatan tapak', 'Site visits')}</div>${visits.map(v => `<div class="set-row"><span>${fmtTime(punchTime(v))} · ${esc(v.locName)}${v.note ? `<div class="xs muted">${esc(v.note)}</div>` : ''}</span>${v.lat != null ? `<a class="xs" target="_blank" href="https://www.google.com/maps?q=${v.lat},${v.lng}">${L('Peta', 'Map')}</a>` : ''}</div>`).join('')}` : ''}
+      ${trail.length > 1 ? `<div class="sec-title">${L('Jejak lokasi', 'Location trail')}</div>${trail.map(p => `<div class="set-row"><span>${fmtTime(p.t)} · ${esc(p.n || '-')}${p.auto ? ' <span class="badge b-warn">AUTO</span>' : ''}</span>${p.lat != null ? `<a class="xs" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${p.lat},${p.lng}">${L('Peta', 'Map')}</a>` : ''}</div>`).join('')}` : ''}
       ${claims.length ? `<div class="sec-title">${L('Tuntutan hari ini', 'Claims this day')}</div>${claims.map(c => `<div class="set-row"><span>${esc(c.category || '')}${c.km ? ` · ${c.km} km` : ''}</span><span>${money(c.amount)} ${statusBadge(c.status)}</span></div>`).join('')}` : ''}
       <div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><b class="right">${esc(S.plans?.[d] || '-')}</b></div>
       <div class="stack" style="margin-top:.8rem">
@@ -1250,6 +1319,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
       <div class="sec-title" style="margin-top:.2rem">Journey From/To</div>
       <p class="xs muted" style="margin-top:-.3rem">${L('Pilih tempat tersimpan, tekan 📍 untuk lokasi semasa, atau tampal koordinat / pautan Google Maps. Jarak & RM dikira automatik.', 'Pick a saved place, tap 📍 for current location, or paste coordinates / a Google Maps link. Distance & RM are calculated automatically.')}</p>
       <div id="jPts"></div>
+      <div class="row"><button type="button" class="btn btn-sm btn-soft" id="jTrail">${icon('pin', 16)} ${L('Isi dari jejak lokasi hari ini', 'Fill from today\'s location trail')}</button></div>
       <div class="row"><button type="button" class="btn btn-sm btn-plus" id="jAddPt">${icon('plus', 16)} ${L('Tambah hentian', 'Add stop')}</button>
         <label class="check"><input type="checkbox" id="jRt" ${j.roundTrip ? 'checked' : ''}>${L('Pergi-balik (kembali ke titik mula)', 'Round trip (back to start)')}</label></div>
       <div class="card" style="margin-top:.6rem;padding:.8rem">
@@ -1352,6 +1422,18 @@ function journeyForm(cl, j = {}, idx = null, after) {
     }
   });
   $('#jAddPt', el).onclick = () => { syncPts(); pts.splice(pts.length - 1, 0, { n: '', lat: null, lng: null }); drawPts(); };
+  $('#jTrail', el).onclick = async (e) => {
+    const d = $('#jd', el).value; busy(e.currentTarget, true);
+    try {
+      const tr = (await loadTrail(d)).filter(p => p.lat != null);
+      // Buang titik berturutan dalam 100 m
+      const out = []; tr.forEach(p => { const q = out[out.length - 1]; if (!q || haversine(q.lat, q.lng, p.lat, p.lng) >= 100) out.push(p); });
+      if (out.length < 2) { toast(L('Tiada pergerakan direkod pada tarikh ini.', 'No movement recorded on this date.'), 'warn'); return; }
+      pts = out.map(p => ({ n: p.n || `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`, lat: p.lat, lng: p.lng }));
+      drawPts(); calc();
+      toast(L(`${out.length} titik diisi. Semak & buang yang bukan urusan kerja.`, `${out.length} points filled. Check & remove any that aren't work trips.`));
+    } finally { busy(e.currentTarget, false); }
+  };
   $('#jRt', el).onchange = calc;
   $('#jMan', el).onchange = (e) => { manual = e.target.checked; $('#jKmIn', el).classList.toggle('hide', !manual); calc(); upd(); };
   el.addEventListener('input', (e) => { if (!e.target.closest('#jPts')) upd(); });

@@ -242,6 +242,15 @@ service cloud.firestore {
                           && request.resource.data.status in ['draft', 'submitted']);
         allow delete: if isFullAdmin(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid && resource.data.status == 'draft');
       }
+      // Jejak lokasi waktu kerja (pekerja cipta sendiri; admin & pekerja itu boleh baca)
+      match /trail/{tid} {
+        allow read: if isAdminOf(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
+        allow create: if isWorkerOf(cid) && companyActive(cid)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.ts == request.time
+          && workerDoc(cid, request.resource.data.workerId).uid == request.auth.uid;
+        allow delete: if isFullAdmin(cid);
+      }
       match /claimFiles/{fid} {
         allow read: if isAdminOf(cid) || (isWorkerOf(cid) && resource.data.uid == request.auth.uid);
         allow create: if isWorkerOf(cid) && request.resource.data.uid == request.auth.uid;
