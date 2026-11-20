@@ -643,6 +643,7 @@ function renderWorkerList() {
         ${w.mustChangePin ? `<div class="xs muted">${L('Belum log masuk', 'Not logged in yet')}</div>` : ''}</td>
       <td class="right" style="white-space:nowrap">
         ${w.phone ? `<a class="btn btn-sm btn-ghost" title="WhatsApp" target="_blank" rel="noopener" href="https://wa.me/${String(w.phone).replace(/\D/g, '').replace(/^0/, '60')}">${icon('chat', 16)}</a>` : ''}
+        <button class="btn btn-sm btn-primary" data-cal="${esc(w.id)}">${icon('cal', 16)} ${L('Kalendar', 'Calendar')}</button>
         ${w.active !== false ? `<button class="btn btn-sm btn-soft" data-cp="${esc(w.id)}" title="${L('Salin ID & PIN untuk dihantar kepada pekerja', 'Copy ID & PIN to send to the staff member')}">${icon('copy', 16)} ${L('Salin log masuk', 'Copy login')}</button>` : ''}
         <button class="btn btn-sm btn-ghost" data-ed="${esc(w.id)}">${L('Sunting', 'Edit')}</button>
         <button class="btn btn-sm btn-ghost" data-more="${esc(w.id)}">⋯</button>
@@ -650,6 +651,7 @@ function renderWorkerList() {
     <p class="xs muted" style="margin-top:.6rem">${list.length} / ${S.workers.length} ${L('pekerja', 'staff')}</p>`;
   $$('[data-ed]', box).forEach(b => b.onclick = () => workerForm(S.workers.find(w => w.id === b.dataset.ed)));
   $$('[data-cp]', box).forEach(b => b.onclick = (e) => copyLogin(S.workers.find(w => w.id === b.dataset.cp), e.currentTarget));
+  $$('[data-cal]', box).forEach(b => b.onclick = () => staffCalendar(S.workers.find(w => w.id === b.dataset.cal)));
   $$('[data-more]', box).forEach(b => b.onclick = () => workerMenu(S.workers.find(w => w.id === b.dataset.more)));
 }
 
@@ -2015,6 +2017,7 @@ async function drawPayrun() {
           <td class="right">${money(x.gross)}</td><td class="right">${x.claims ? money(x.claims) : '-'}</td><td class="right">${money(x.totalDed)}</td>
           <td class="right bold">${money(x.net)}</td>
           <td class="right" style="white-space:nowrap">
+            <button class="btn btn-sm btn-soft" data-pcal="${esc(x.workerId)}" title="${L('Semak kalendar', 'Check calendar')}">${icon('cal', 14)}</button>
             ${!locked ? `<button class="btn btn-sm btn-ghost" data-pe="${esc(x.workerId)}">${L('Sunting', 'Edit')}</button>` : ''}
             <button class="btn btn-sm btn-ghost" data-ps="${esc(x.workerId)}">${L('Slip', 'Slip')}</button>
           </td></tr>`).join('')}</tbody>
@@ -2036,6 +2039,7 @@ async function drawPayrun() {
         : `<p class="xs muted" style="margin-top:.5rem">${L('Semak & sunting setiap pekerja, kemudian tekan "Kunci & Terbit Slip". Tuntutan & pendahuluan akan ditanda dibayar, dan item "sekali sahaja" dibuang dari profil pekerja.', 'Review & edit each staff, then press "Lock & Publish Slips". Claims & advances will be marked paid, and "one-time" items removed from staff profiles.')}</p>`}
     </div>`;
   $$('[data-pe]').forEach(b => b.onclick = () => editPayItem(period, run.items[b.dataset.pe]));
+  $$('[data-pcal]').forEach(b => b.onclick = () => staffCalendar(S.workers.find(w => w.id === b.dataset.pcal), period));
   $$('[data-ps]').forEach(b => b.onclick = () => openPrint(payslipHtml(S.company, run.items[b.dataset.ps], period), false) || toast(L('Benarkan pop-up untuk lihat slip.', 'Allow pop-ups to view the slip.'), 'warn'));
   $('#payPrint').onclick = () => openPrint(payslipHtml(S.company, items, period)) || toast(L('Benarkan pop-up untuk cetak.', 'Allow pop-ups to print.'), 'warn');
   $('#payXl').onclick = () => payExcel(period, items, t);
@@ -3405,3 +3409,125 @@ function importWorkers() {
     rows = [];
   };
 }
+
+
+// ================================================================ KALENDAR PEKERJA (semakan sebelum lulus gaji)
+// Satu skrin: masuk/keluar setiap hari, lewat, tidak hadir, cuti/MC, OT, auto-keluar, lokasi & tuntutan.
+async function staffCalendar(w, month) {
+  if (!w) return;
+  month = month || S.calMonth || todayStr().slice(0, 7);
+  S.calMonth = month;
+  const m = modal({ title: `${esc(w.name)} · ${esc(w.id)}`, wide: true, body: `<div class="loader" style="min-height:220px"><span class="spin"></span></div>`, actions: [{ label: L('Tutup', 'Close') }] });
+  const el = m.el, body = $('.modal-body', el) || el.querySelector('.modal-body') || el;
+  const [y, mo] = month.split('-').map(Number);
+  const from = `${month}-01`, to = `${month}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`;
+  const t = todayStr();
+  let att = [], reqs = [], trail = [], roster = {}, claim = null, notes = {};
+  try {
+    const uidQ = w.uid ? getDocs(query(sub('attendance'), where('uid', '==', w.uid), where('date', '>=', from), where('date', '<=', to))) : Promise.resolve({ docs: [] });
+    const [a, r, tr, ro, cl, pl] = await Promise.all([
+      uidQ.catch(() => getDocs(query(sub('attendance'), where('date', '>=', from), where('date', '<=', to)))),
+      getDocs(query(sub('requests'), where('workerId', '==', w.id))).catch(() => ({ docs: [] })),
+      getDocs(query(sub('trail'), where('workerId', '==', w.id))).catch(() => ({ docs: [] })),
+      loadRoster(db, S.cid, from, to).catch(() => ({})),
+      getDoc(doc(db, 'companies', S.cid, 'claims', `${w.id}_${month}`)).catch(() => null),
+      getDocs(query(sub('plans'), where('workerId', '==', w.id))).catch(() => ({ docs: [] }))
+    ]);
+    att = a.docs.map(x => ({ id: x.id, ...x.data() })).filter(x => x.workerId === w.id);
+    reqs = r.docs.map(x => ({ id: x.id, ...x.data() }));
+    trail = tr.docs.map(x => x.data()).filter(x => x.date >= from && x.date <= to);
+    roster = ro; claim = cl?.exists?.() ? cl.data() : null;
+    pl.docs.forEach(x => { const d = x.data(); if (d.date >= from && d.date <= to) notes[d.date] = d.note; });
+  } catch (e) { body.innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; return; }
+
+  const lv = leaveDateMap(reqs), hol = holidayMap(S.company);
+  const byDate = {}; att.forEach(r => (byDate[r.date] = byDate[r.date] || []).push(r));
+  const tByDate = {}; trail.forEach(r => (tByDate[r.date] = tByDate[r.date] || []).push(r));
+  const reqOn = (d) => reqs.filter(r => (r.kind === 'leave' ? (d >= r.from && d <= (r.to || r.from)) : r.date === d));
+  const days = dateRange(from, to);
+  const tot = { sched: 0, present: 0, late: 0, lateMin: 0, absent: 0, leave: 0, mc: 0, workMin: 0, otAp: 0, otPend: 0, auto: 0 };
+  const info = days.map(d => {
+    const day = resolveDay(S.company, w, d, roster[d]?.[w.id]);
+    const recs = (byDate[d] || []).filter(r => r.type !== 'visit');
+    const sm = recs.length ? summarizeDay(recs, lateSettings(S.company, day), d) : null;
+    const leave = lv[d];
+    const isMC = leave && (leave.typeId === 'sick' || /\bmc\b|sakit|sick|medical/i.test(leave.typeName || ''));
+    const ots = reqs.filter(r => r.kind === 'ot' && r.date === d);
+    const otAp = ots.filter(r => r.status === 'approved').reduce((a, r) => a + Number(r.approvedHours ?? r.hours ?? 0), 0);
+    const otPend = ots.filter(r => r.status === 'pending').reduce((a, r) => a + Number(r.hours || 0), 0);
+    const auto = recs.some(r => r.auto);
+    let st = '';
+    if (leave) { st = isMC ? 'mc' : 'leave'; isMC ? tot.mc++ : tot.leave++; }
+    else if (hol[d] && !sm) st = 'hol';
+    else if (day.type !== 'work' && !sm) st = 'off';
+    else if (sm) { st = sm.lateMin > 0 ? 'late' : 'ok'; tot.present++; if (sm.lateMin > 0) { tot.late++; tot.lateMin += sm.lateMin; } tot.workMin += sm.workMin || 0; }
+    else if (d <= t && day.type === 'work') { st = 'abs'; tot.absent++; }
+    if (day.type === 'work') tot.sched++;
+    tot.otAp += otAp; tot.otPend += otPend; if (auto) tot.auto++;
+    return { d, day, sm, leave, isMC, otAp, otPend, auto, st, recs: byDate[d] || [], tr: tByDate[d] || [], rq: reqOn(d) };
+  });
+  const CLS = { ok: 'cal-ok', late: 'cal-late', leave: 'cal-leave', mc: 'cal-leave', hol: 'cal-hol', off: 'cal-off', abs: 'cal-abs' };
+  const LBL = { ok: L('Hadir', 'Present'), late: L('Lewat', 'Late'), leave: L('Cuti', 'Leave'), mc: 'MC', hol: L('Cuti U.', 'Holiday'), off: L('Rehat', 'Off'), abs: L('Tak hadir', 'Absent') };
+  const first = new Date(y, mo - 1, 1).getDay(), lead = (first + 6) % 7;
+  const X = claim ? computeClaim(claim, S.company) : null;
+  const stat = (n, t2, cls = '') => `<div class="stat ${cls}"><div class="n" style="font-size:1.15rem">${n}</div><div class="t">${t2}</div></div>`;
+
+  body.innerHTML = `
+    <div class="row between" style="margin-bottom:.6rem">
+      <div class="row"><button class="btn btn-sm btn-ghost" id="scPrev">‹</button><b>${new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</b><button class="btn btn-sm btn-ghost" id="scNext">›</button></div>
+      <span class="small muted">${esc(w.position || '')}${w.dept ? ' · ' + esc(w.dept) : ''}</span>
+    </div>
+    <div class="stats">
+      ${stat(`${tot.present}/${tot.sched}`, L('Hadir / hari kerja', 'Present / work days'), 'ok')}
+      ${stat(`${tot.late}${tot.lateMin ? ` · ${tot.lateMin}m` : ''}`, L('Lewat', 'Late'), 'warn')}
+      ${stat(tot.absent, L('Tidak hadir', 'Absent'), 'bad')}
+      ${stat(`${tot.leave} / ${tot.mc}`, L('Cuti / MC (hari)', 'Leave / MC (days)'), 'info')}
+      ${stat(minsToHM(tot.workMin), L('Jam kerja', 'Work hours'))}
+      ${stat(`${r1(tot.otAp)}j${tot.otPend ? ` <span class="small" style="color:var(--warn)">+${r1(tot.otPend)}j ${L('menunggu', 'pending')}</span>` : ''}`, L('OT diluluskan', 'Approved OT'))}
+      ${stat(tot.auto, L('Auto tamat kerja', 'Auto clock-outs'), tot.auto ? 'warn' : '')}
+      ${stat(X ? money(X.reimbursement) : '-', `${L('Tuntutan', 'Claim')}${claim ? ' · ' + esc(claim.status) : ''}`)}
+    </div>
+    <div class="cal" style="margin-top:.6rem">
+      ${[1, 2, 3, 4, 5, 6, 0].map(i => `<div class="cal-k">${dayName(i)}</div>`).join('')}
+      ${'<div></div>'.repeat(lead)}
+      ${info.map(x => `<button type="button" class="cal-d ${CLS[x.st] || ''} ${x.d === t ? 'cal-today' : ''}" data-scd="${x.d}" style="aspect-ratio:auto;min-height:74px;align-content:start;padding:4px 2px;line-height:1.15">
+        <b>${Number(x.d.slice(8))}</b>
+        ${x.sm ? `<span class="cal-t">${fmtTime(x.sm.firstIn)}<br>${x.sm.open ? '…' : fmtTime(x.sm.lastOut)}</span>` : ''}
+        <span class="cal-s">${LBL[x.st] || ''}</span>
+        ${x.otAp || x.otPend ? `<span class="cal-s" style="color:var(--gold)">OT ${r1(x.otAp || x.otPend)}j${x.otPend && !x.otAp ? '?' : ''}</span>` : ''}
+        ${x.auto ? `<span class="cal-s" style="color:var(--warn)">AUTO</span>` : ''}
+        ${x.tr.length || x.recs.some(r => r.type === 'visit') ? '<i></i>' : ''}</button>`).join('')}
+    </div>
+    <p class="xs muted" style="margin:.4rem 0">${L('Tekan tarikh untuk butiran: masuk/keluar, lokasi, OT, cuti & catatan. OT dengan "?" belum diluluskan. • = ada rekod lokasi luar.', 'Tap a date for details: in/out, locations, OT, leave & notes. OT with "?" is not yet approved. • = has outside-location records.')}</p>
+    <div id="scDay"></div>`;
+  $('#scPrev', el).onclick = () => { m.close(); const d = new Date(y, mo - 2, 1); staffCalendar(w, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); };
+  $('#scNext', el).onclick = () => { m.close(); const d = new Date(y, mo, 1); staffCalendar(w, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); };
+  const showDay = (d) => {
+    const x = info.find(i => i.d === d); if (!x) return;
+    $$('[data-scd]', el).forEach(b => b.style.outline = b.dataset.scd === d ? '2px solid var(--gold)' : '');
+    const pts = [
+      ...x.recs.map(r => ({ t: toDate(r.ts) || new Date(r.clientTs || 0), what: (TYPE_LABEL[r.type] ? TYPE_LABEL[r.type]() : r.type), how: METHOD_LABEL[r.method] ? METHOD_LABEL[r.method]() : (r.method || ''), place: r.type === 'visit' ? [r.locName, r.note].filter(Boolean).join(' — ') : (r.locName || ''), lat: r.lat, lng: r.lng, auto: r.auto })),
+      ...x.tr.map(r => ({ t: toDate(r.ts) || new Date(r.clientTs || 0), what: L('Jejak lokasi', 'Location trail'), how: 'GPS', place: r.place || '', lat: r.lat, lng: r.lng }))
+    ].sort((a, b) => a.t - b.t);
+    $('#scDay', el).innerHTML = `<div class="card" style="margin-top:.4rem">
+      <h3 style="margin-top:0">${fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
+      <div class="set-row"><span class="muted small">${L('Syif', 'Shift')}</span><b>${x.day.shift ? esc(shiftLabel(x.day.shift)) : (x.day.type === 'holiday' ? esc(hol[d] || L('Cuti umum', 'Holiday')) : L('Hari rehat', 'Rest day'))}</b></div>
+      ${x.sm ? `<div class="set-row"><span class="muted small">${L('Masuk → Keluar', 'In → Out')}</span><b>${fmtTime(x.sm.firstIn)} → ${x.sm.open ? L('masih bekerja', 'still working') : fmtTime(x.sm.lastOut)}</b></div>
+        <div class="set-row"><span class="muted small">${L('Jam kerja / rehat', 'Work / break')}</span><b>${minsToHM(x.sm.workMin)} · ${Math.round(x.sm.breakMin || 0)}m</b></div>
+        ${x.sm.lateMin ? `<div class="set-row"><span class="muted small">${L('Lewat', 'Late')}</span><b style="color:var(--warn)">${x.sm.lateMin} ${L('minit', 'min')}</b></div>` : ''}` : ''}
+      ${x.leave ? `<div class="set-row"><span class="muted small">${x.isMC ? 'MC' : L('Cuti', 'Leave')}</span><b>${esc(x.leave.typeName || leaveTypeName(S.company, x.leave.typeId) || '')}${x.leave.attachment ? ` <a href="#" data-scmc="${esc(x.leave.id)}">📎 ${L('Lihat MC', 'View MC')}</a>` : ''}</b></div>` : ''}
+      ${x.rq.filter(r => r.kind !== 'leave' || r.status !== 'approved').map(r => `<div class="set-row"><span class="small">${esc(REQ_LABEL[r.kind] ? REQ_LABEL[r.kind]() : r.kind)}${r.auto ? ' <span class="badge b-info">AUTO</span>' : ''}${r.kind === 'ot' ? ` · ${esc(r.start || '')}–${esc(r.end || '')} · <b>${r.approvedHours ?? r.hours}j</b>` : ''}${r.reason ? `<div class="xs muted">${esc(r.reason)}</div>` : ''}</span>${STATUS_BADGE(r.status)}</div>`).join('')}
+      ${notes[d] ? `<div class="set-row"><span class="muted small">📍 ${L('Catatan', 'Note')}</span><span class="small" style="white-space:pre-line;text-align:right">${esc(notes[d])}</span></div>` : ''}
+      ${pts.length ? `<div class="sec-title">${L('Rekod & lokasi', 'Records & locations')}</div>
+        <div class="table-wrap"><table><tbody>${pts.map(p => `<tr><td class="mono">${fmtTime(p.t)}</td><td class="small">${esc(p.what)}${p.auto ? ' <span class="badge b-warn">AUTO</span>' : ''}<div class="xs muted">${esc(p.how)}</div></td><td class="small">${esc(p.place || '-')}</td>
+          <td class="right">${p.lat != null ? `<a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${p.lat},${p.lng}">${icon('pin', 14)} ${L('Peta', 'Map')}</a>` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="small muted">${L('Tiada rekod punch.', 'No punch records.')}</p>`}
+      ${x.rq.some(r => r.status === 'pending') ? `<button class="btn btn-sm btn-primary" id="scGoAp" style="margin-top:.6rem">${L('Pergi ke Kelulusan', 'Go to Approvals')}</button>` : ''}
+    </div>`;
+    $('#scGoAp', el) && ($('#scGoAp', el).onclick = () => { m.close(); go('approvals'); });
+    $$('[data-scmc]', el).forEach(a => a.onclick = (e) => { e.preventDefault(); const r = reqs.find(q => q.id === a.dataset.scmc); if (r?.attachment) modal({ title: 'MC', body: `<img src="${esc(r.attachment)}" alt="MC" style="width:100%;border-radius:10px">`, actions: [{ label: L('Tutup', 'Close') }] }); });
+    $('#scDay', el).scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  $$('[data-scd]', el).forEach(b => b.onclick = () => showDay(b.dataset.scd));
+  showDay(days.includes(t) ? t : days[days.length - 1]);
+}
+const r1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
