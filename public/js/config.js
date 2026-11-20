@@ -27,7 +27,7 @@ export const SDK = "10.12.2";
 // Notifikasi push (pilihan): Firebase Console → Project settings → Cloud Messaging →
 // Web Push certificates → "Generate key pair", kemudian tampal kunci di sini.
 // Biarkan kosong untuk matikan notifikasi push.
-export const VAPID_KEY = "";
+export const VAPID_KEY = "BKhLhZl6oEhxwII8FmLcy262N2JRpJYuHRj3CBekzWyJAd3-iWxbpODwxVb9Kz-SK51MpRVL5jp4D3oAp68Uk8Y";
 
 // Versi aplikasi (dipaparkan di bawah menu — untuk pastikan deploy terkini)
-export const APP_VERSION = "2026.11.20-l";
+export const APP_VERSION = "2026.11.21-a";
