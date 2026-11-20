@@ -151,10 +151,22 @@ export function countLeaveDays(c, w, from, to, half, roster = {}) {
   return dateRange(from, to).filter(d => resolveDay(c, w, d, roster[d]?.[w?.id]).type === 'work').length;
 }
 // Baki cuti untuk tahun semasa
+// Kelayakan pro-rata (cuti tahunan) untuk pekerja yang mula bekerja pada tahun semasa
+export function proRata(ent, startDate, year) {
+  const m = String(startDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m || Number(m[1]) !== Number(year)) return ent;
+  if (Number(m[1]) > Number(year)) return 0;
+  const months = 12 - Number(m[2]) + (Number(m[3]) <= 15 ? 1 : 0);   // bulan penuh berkhidmat
+  return Math.round(ent * Math.max(0, months) / 12);                  // ≥ 0.5 dibundar naik
+}
 export function leaveBalances(c, w, approvedLeaves, year = new Date().getFullYear()) {
+  const pr = !!c?.settings?.leaveProrata;
   return leaveTypes(c).map(t => {
-    const ent = Number(w?.leaveEntitle?.[t.id] ?? t.days ?? 0);
-    const carry = Number(w?.leaveCarry?.[t.id] || 0);
+    const full = Number(w?.leaveEntitle?.[t.id] ?? t.days ?? 0);
+    const ent = pr && t.id === 'annual' ? proRata(full, w?.startDate, year) : full;
+    // Baki dibawa ke hadapan hanya sah untuk tahun yang ditetapkan
+    const cy = w?.leaveCarryYear;
+    const carry = (cy == null || Number(cy) === Number(year)) ? Number(w?.leaveCarry?.[t.id] || 0) : 0;
     const used = approvedLeaves
       .filter(r => r.kind === 'leave' && r.typeId === t.id && String(r.from || '').startsWith(String(year)))
       .reduce((a, r) => a + Number(r.days || 0), 0);

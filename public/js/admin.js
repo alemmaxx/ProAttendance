@@ -764,6 +764,7 @@ async function saveWorker(el, w) {
     workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],
     leaveEntitle: Object.fromEntries($$('[data-ent]', el).filter(x => x.value !== '').map(x => [x.dataset.ent, Number(x.value)])),
     leaveCarry: Object.fromEntries($$('[data-carry]', el).filter(x => x.value !== '').map(x => [x.dataset.carry, Number(x.value)])),
+    leaveCarryYear: new Date().getFullYear(),
     statutory: {}
   };
   try {
@@ -1228,6 +1229,13 @@ function viewSettings() {
     <div id="ltBox">${leaveTypes(c).map(ltRow).join('')}</div>
     <div class="row"><button class="btn btn-sm btn-plus" id="ltAdd">${icon('plus', 16)} ${L('Tambah Jenis Cuti', 'Add Leave Type')}</button>
       <button class="btn btn-primary btn-sm" id="ltSave">${L('Simpan', 'Save')}</button></div>
+    <div class="sec-title">${L('Pro-rata & Bawa ke Hadapan', 'Pro-rata & Carry Forward')}</div>
+    <div class="set-row"><div><b>${L('Cuti tahunan pro-rata', 'Pro-rated annual leave')}</b><div class="small muted">${L('Pekerja yang mula bekerja tahun ini dapat cuti tahunan ikut bulan berkhidmat (perlu Tarikh Mula Kerja dalam profil).', 'Staff who joined this year get annual leave by months served (needs Start Date in the profile).')}</div></div>
+      <label class="switch"><input type="checkbox" id="lvPr" ${c.settings?.leaveProrata ? 'checked' : ''}><span></span></label></div>
+    <div class="set-row"><div><b>${L('Had bawa ke hadapan (hari)', 'Carry-forward limit (days)')}</b><div class="small muted">${L('Baki cuti tahunan maksimum yang boleh dibawa ke tahun baharu.', 'Maximum unused annual leave carried into the new year.')}</div></div>
+      <input class="input" type="number" min="0" step="0.5" id="lvCarryMax" value="${c.settings?.carryMax ?? 5}" style="max-width:100px"></div>
+    <div class="row"><button class="btn btn-primary btn-sm" id="lvSave">${L('Simpan', 'Save')}</button>
+      <button class="btn btn-soft btn-sm" id="lvCarry">${L(`Kira baki bawa ke ${new Date().getFullYear()}`, `Calculate carry-forward into ${new Date().getFullYear()}`)}</button></div>
   </div>
 
   <div class="card">
@@ -1361,6 +1369,38 @@ function viewSettings() {
     try { await updateDoc(cRef(), { leaveTypes: rows }); toast(L('Jenis cuti disimpan.', 'Leave types saved.')); viewSettings(); }
     catch (err) { toast(authErr(err), 'bad'); busy(e.currentTarget, false); }
   };
+  // Pro-rata & bawa ke hadapan
+  $('#lvSave').onclick = async (e) => {
+    busy(e.currentTarget, true);
+    try { await updateDoc(cRef(), { 'settings.leaveProrata': $('#lvPr').checked, 'settings.carryMax': Number($('#lvCarryMax').value || 0) }); toast(L('Disimpan.', 'Saved.')); }
+    catch (err) { toast(authErr(err), 'bad'); } finally { busy(e.currentTarget, false); }
+  };
+  $('#lvCarry').onclick = async (e) => {
+    const Y = new Date().getFullYear(), max = Number($('#lvCarryMax').value || 0);
+    busy(e.currentTarget, true);
+    try {
+      const s = await getDocs(query(sub('requests'), where('kind', '==', 'leave')));
+      const prev = s.docs.map(d => d.data()).filter(r => r.status === 'approved' && String(r.from || '').startsWith(String(Y - 1)));
+      const rows = S.workers.filter(w => w.active !== false).map(w => {
+        const b = leaveBalances(S.company, { ...w, leaveCarryYear: w.leaveCarryYear ?? Y - 1 }, prev.filter(r => r.workerId === w.id), Y - 1).find(x => x.id === 'annual');
+        const left = Math.max(0, b ? b.left : 0);
+        return { w, left, carry: Math.min(max, left) };
+      });
+      busy(e.currentTarget, false);
+      modal({
+        title: L(`Baki cuti tahunan dibawa ke ${Y}`, `Annual leave carried into ${Y}`), wide: true,
+        body: `<p class="small muted">${L(`Baki cuti tahunan ${Y - 1} setiap pekerja, dihadkan kepada ${max} hari.`, `Each staff member's unused ${Y - 1} annual leave, capped at ${max} days.`)}</p>
+          <div class="table-wrap" style="max-height:340px;overflow:auto"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th class="right">${L(`Baki ${Y - 1}`, `${Y - 1} balance`)}</th><th class="right">${L('Dibawa', 'Carried')}</th></tr></thead><tbody>
+          ${rows.map(r => `<tr><td>${esc(r.w.name)} <span class="xs muted mono">${esc(r.w.id)}</span></td><td class="right">${r.left}</td><td class="right"><b>${r.carry}</b></td></tr>`).join('')}</tbody></table></div>`,
+        actions: [{ label: L('Batal', 'Cancel') }, { label: L('Simpan ke profil pekerja', 'Save to staff profiles'), cls: 'btn-primary', onClick: async () => {
+          const b = writeBatch(db);
+          rows.forEach(r => b.update(doc(db, 'companies', S.cid, 'workers', r.w.id), { 'leaveCarry.annual': r.carry, leaveCarryYear: Y }));
+          await b.commit(); logAct('leave.carry', `${Y}`); toast(L('Baki bawa ke hadapan disimpan.', 'Carry-forward saved.'));
+        } }]
+      });
+    } catch (err) { toast(authErr(err), 'bad'); busy(e.currentTarget, false); }
+  };
+
   // Cuti umum
   const holBox = $('#holBox'); bindDyn(holBox);
   const readHol = () => $$('[data-row="hol"]', holBox).map(r => ({ date: $('[data-k="date"]', r).value, name: $('[data-k="name"]', r).value.trim() })).filter(h => h.date);
