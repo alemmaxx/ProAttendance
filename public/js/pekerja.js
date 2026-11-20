@@ -141,7 +141,7 @@ const planList = (d) => String(S.plans?.[d] || '').split('\n').map(x => x.trim()
 async function savePlan(date, lines) {
   const note = lines.map(x => x.trim()).filter(Boolean).join('\n').slice(0, 1500);
   const ref = doc(db, 'companies', S.cid, 'plans', `${S.me.workerId}_${date}`);
-  if (!note) { await deleteDoc(ref); delete S.plans[date]; return; }
+  if (!note) { if (S.plans?.[date]) await deleteDoc(ref); delete S.plans?.[date]; return; }
   await setDoc(ref, { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date, note, at: serverTimestamp() });
   S.plans = S.plans || {}; S.plans[date] = note;
 }
@@ -149,7 +149,10 @@ async function placeName(lat, lng) {
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=${lat}&lon=${lng}&accept-language=ms,en`, { headers: { Accept: 'application/json' } });
     const j = await r.json(), a = j.address || {};
-    return ([a.amenity || a.building || a.shop || a.office, a.road || a.neighbourhood || a.suburb, a.city || a.town || a.village || a.county].filter(Boolean).join(', ') || j.display_name || '').slice(0, 120);
+    const clean = (x) => String(x || '').replace(/\s*\([^)]*\)/g, '').trim();
+    const parts = [a.amenity || a.building || a.shop || a.office, a.road || a.neighbourhood, a.suburb || a.town || a.city || a.village]
+      .map(clean).filter(Boolean).filter((x, i, arr) => arr.indexOf(x) === i);
+    return (parts.join(', ') || clean(j.display_name)).slice(0, 90);
   } catch { return ''; }
 }
 async function trailTick(force = false) {
@@ -505,7 +508,18 @@ function viewHome() {
   tick(); S.clockT = setInterval(tick, 1000);
   $('#mainBtn').onclick = (e) => punch(main, e.currentTarget);
   if ($('#visitBtn')) { $('#visitBtn').onclick = visitForm; checkOutsideOffice(); }
-  $$('[data-plan]').forEach(r => r.onclick = (e) => { if (e.target.closest('[data-here]')) return; planNote(r.dataset.plan); });
+  $$('[data-plan]').forEach(r => r.onclick = async (e) => {
+    if (e.target.closest('[data-here]')) return;
+    const del = e.target.closest('[data-pldel]');
+    if (del) {
+      const [d, k] = del.dataset.pldel.split('|'), list = planList(d), nm = list[Number(k)];
+      if (!await confirmBox(L(`Padam "${nm}" daripada catatan?`, `Delete "${nm}" from notes?`), L('Padam', 'Delete'))) return;
+      list.splice(Number(k), 1);
+      try { await savePlan(d, list); toast(L('Dipadam.', 'Deleted.')); refreshPlanViews(); } catch (er) { toast(authErr(er), 'bad'); }
+      return;
+    }
+    planNote(r.dataset.plan);
+  });
   fillHere();
   drawWeekStrip();
   $('#lvCard') && ($('#lvCard').onclick = () => go('mohon'));
@@ -582,7 +596,7 @@ function upcomingHtml() {
       : info.type === 'holiday' && !info.shift ? `<span class="badge b-info">${esc(info.holiday)}</span>`
       : `<span class="badge b-brand">${esc(shiftLabel(info.shift))}</span>`;
     rows.push(`<div class="set-row" data-plan="${d}" style="cursor:pointer"><div><b>${i === 0 ? L('Hari ini', 'Today') : dayName(dt.getDay())}</b>, ${fmtDate(d, { day: 'numeric', month: 'short' })}
-      ${planList(d).map(x => `<div class="xs" style="color:var(--gold)">📍 ${esc(x)}</div>`).join('')}
+      ${planList(d).map((x, k) => `<div class="pl-item xs"><span>📍 ${esc(x)}</span><button type="button" class="pl-del" data-pldel="${d}|${k}" aria-label="${L('Padam', 'Delete')}">✕</button></div>`).join('')}
       <div class="xs muted">+ ${planList(d).length ? L('Tambah tempat lain', 'Add another place') : L('Ke mana hari ini?', 'Where to?')}</div>
       ${i === 0 ? `<div class="here-line xs" id="hereLine"><span class="muted">📡 ${L('Mencari lokasi semasa…', 'Finding current location…')}</span></div>` : ''}</div>${lbl}</div>`);
   }
@@ -811,8 +825,8 @@ async function fillHere() {
     const h = await herePlace();
     if (!$('#hereLine')) return;
     const t = todayStr(), has = planList(t).includes(h.name);
-    $('#hereLine').innerHTML = `<span class="muted">📡 ${L('Sekarang', 'Now')}:</span> <b>${esc(h.name)}</b>
-      ${has ? `<span class="muted">✓</span>` : `<button type="button" class="btn btn-sm btn-soft" data-here style="min-height:26px;padding:2px 9px;margin-left:4px">+ ${L('Tambah', 'Add')}</button>`}`;
+    $('#hereLine').innerHTML = `<span class="here-txt"><span class="muted">📡 ${L('Sekarang', 'Now')}:</span> ${esc(h.name)}</span>
+      ${has ? `<span class="muted">✓</span>` : `<button type="button" class="btn btn-sm btn-soft here-add" data-here>+ ${L('Tambah', 'Add')}</button>`}`;
     const b = $('[data-here]'); b && (b.onclick = async (e) => {
       e.stopPropagation(); busy(b, true);
       try { await savePlan(t, [...planList(t), h.name]); toast(L('Lokasi ditambah ke catatan hari ini.', 'Location added to today\'s notes.')); refreshPlanViews(); }
@@ -852,7 +866,14 @@ function planNote(date, after) {
       <button type="button" class="icon-btn" data-plx="${i}" aria-label="${L('Buang', 'Remove')}">✕</button></div>`).join('');
   };
   draw();
-  $('#plBox', el).addEventListener('click', (e) => { const b = e.target.closest('[data-plx]'); if (!b) return; sync(); list.splice(Number(b.dataset.plx), 1); draw(); });
+  $('#plBox', el).addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-plx]'); if (!b) return;
+    sync(); const gone = list.splice(Number(b.dataset.plx), 1)[0]; draw();
+    // Padam terus (tidak perlu tekan Simpan) jika tempat itu sudah disimpan
+    if (gone && planList(date).includes(gone.trim())) {
+      try { await savePlan(date, planList(date).filter(x => x !== gone.trim())); toast(L('Dipadam.', 'Deleted.')); (after || refreshPlanViews)(); } catch (er) { toast(authErr(er), 'bad'); }
+    }
+  });
   $('#plAdd', el).onclick = () => { sync(); list.push(''); draw(); $$('[data-pl]', el).pop().focus(); };
   const useHere = async (btn, fresh) => {
     btn && busy(btn, true);

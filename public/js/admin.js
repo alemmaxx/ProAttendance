@@ -2191,8 +2191,11 @@ async function withdrawPay(period, wid, btn) {
   if (!await confirmBox(L(`Tarik balik slip ${it.name}? Slip dipadam daripada app pekerja dan kembali ke draf untuk disunting.`, `Withdraw ${it.name}'s slip? It is removed from the staff app and returns to draft for editing.`))) return;
   busy(btn, true);
   try {
+    const ru = { [`items.${wid}.status`]: 'draft', [`items.${wid}.approvedBy`]: deleteField(), [`items.${wid}.approvedAt`]: deleteField(), status: 'draft', updatedAt: serverTimestamp() };
+    // Larian lama (dikunci sebelum ada status setiap pekerja): tandakan yang lain sebagai diluluskan secara eksplisit
+    Object.values(S.payRun.items || {}).forEach(x => { if (x.workerId !== wid && isAp(x)) ru[`items.${x.workerId}.status`] = 'approved'; });
     const ops = [
-      b => b.update(doc(db, 'companies', S.cid, 'payruns', period), { [`items.${wid}.status`]: 'draft', [`items.${wid}.approvedBy`]: deleteField(), [`items.${wid}.approvedAt`]: deleteField(), status: 'draft', updatedAt: serverTimestamp() }),
+      b => b.update(doc(db, 'companies', S.cid, 'payruns', period), ru),
       b => b.delete(doc(db, 'companies', S.cid, 'payslips', `${period}_${wid}`))
     ];
     (it.advanceIds || []).forEach(id => ops.push(b => b.update(doc(db, 'companies', S.cid, 'requests', id), { paidPeriod: deleteField() })));
@@ -2367,14 +2370,14 @@ function payExcel(period, items, t) {
   const dk = (x, k) => r2((x.deductions || []).filter(d => d.kind === k).reduce((a, d) => a + d.amount, 0));
   const other = (x) => r2((x.deductions || []).filter(d => !['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind)).reduce((a, d) => a + d.amount, 0));
   const head = [[S.company.name], [`${L('Gaji', 'Payroll')}: ${periodLabel(period)}`], []];
-  const rows = items.map(x => [x.workerId, x.name, x.ic, x.bank, x.bankAcc, x.days?.present ?? 0, x.gross, x.claims || 0,
+  const rows = items.map(x => [x.workerId, x.name, x.ic, x.bank, x.bankAcc, x.days?.present ?? 0, x.gross,
     dk(x, 'epf'), dk(x, 'socso'), dk(x, 'eis'), dk(x, 'skbbk'), dk(x, 'pcb'), other(x), x.totalDed, x.net, x.employer?.epf || 0, x.employer?.socso || 0, x.employer?.eis || 0]);
   const ws = XLSX.utils.aoa_to_sheet([...head,
-    ['ID', L('Nama', 'Name'), 'IC', 'Bank', L('No. akaun', 'Account'), L('Hadir', 'Present'), L('Kasar', 'Gross'), L('Tuntutan', 'Claims'),
+    ['ID', L('Nama', 'Name'), 'IC', 'Bank', L('No. akaun', 'Account'), L('Hadir', 'Present'), L('Kasar', 'Gross'),
       L('KWSP pekerja', 'EPF ee'), L('PERKESO pekerja', 'SOCSO ee'), L('SIP pekerja', 'EIS ee'), 'SKBBK', 'PCB', L('Potongan lain', 'Other ded.'), L('Jumlah potongan', 'Total ded.'), L('Bersih', 'Net'),
       L('KWSP majikan', 'EPF er'), L('PERKESO majikan', 'SOCSO er'), L('SIP majikan', 'EIS er')],
-    ...rows, [], ['', L('JUMLAH', 'TOTAL'), '', '', '', '', t.gross, t.claims, '', '', '', t.pcb, '', t.ded, t.net]]);
-  ws['!cols'] = [{ wch: 9 }, { wch: 26 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, ...Array(13).fill({ wch: 12 })];
+    ...rows, [], ['', L('JUMLAH', 'TOTAL'), '', '', '', rows.reduce((a, r) => a + Number(r[5] || 0), 0), ...rows[0] ? rows[0].slice(6).map((_, k) => r2(rows.reduce((a, r) => a + Number(r[6 + k] || 0), 0))) : []]]);
+  ws['!cols'] = [{ wch: 9 }, { wch: 26 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, ...Array(12).fill({ wch: 12 })];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, period);
   XLSX.writeFile(wb, `Gaji_${S.company.code}_${period}.xlsx`);
