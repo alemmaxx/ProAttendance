@@ -8,13 +8,13 @@ import { FIREBASE_CONFIG, DB_ID, REGION, WORKER_EMAIL_DOMAIN } from "./config.js
 
 // Halaman pekerja guna sesi log masuk berasingan, supaya log masuk pekerja & admin
 // dalam pelayar yang sama tidak saling log keluar.
-const WORKER_PAGE = /^\/(index\.html)?$/i.test(location.pathname);
+const WORKER_PAGE = /^\/worker(\.html)?\/?$/i.test(location.pathname);
 export const app = initializeApp(FIREBASE_CONFIG, WORKER_PAGE ? 'pa-worker' : '[DEFAULT]');
 export const auth = getAuth(app);
 
 // Cache tempatan (luar talian) HANYA untuk halaman pekerja & kiosk — punch tetap disimpan semasa tiada internet.
 // Halaman admin / Super Admin guna sambungan terus supaya simpanan tidak tersekat bila banyak tab dibuka.
-const OFFLINE_PAGE = !/\/(admin|superadmin)(\.html)?$/i.test(location.pathname);
+const OFFLINE_PAGE = /^\/(worker|kiosk|qr)(\.html)?\/?$/i.test(location.pathname);
 let _db;
 try {
   _db = OFFLINE_PAGE

@@ -13,8 +13,8 @@ try {
 } catch (e) { /* notifikasi tidak disokong */ }
 
 // ProAttendance service worker — network-first, cache sebagai sandaran
-const CACHE = 'pa-v22';
-const SHELL = ['/', '/index.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/js/sched.js', '/js/payroll.js', '/js/push.js', '/js/claims.js', '/js/fs.js', '/icon.svg', '/icon-192.png', '/manifest.json'];
+const CACHE = 'pa-v23';
+const SHELL = ['/', '/worker', '/worker.html', '/admin.html', '/css/app.css', '/js/ui.js', '/js/fb.js', '/js/config.js', '/js/pekerja.js', '/js/admin.js', '/js/sched.js', '/js/payroll.js', '/js/push.js', '/js/claims.js', '/js/fs.js', '/icon.svg', '/icon-192.png', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}));
@@ -32,6 +32,6 @@ self.addEventListener('fetch', e => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
       return res;
-    }).catch(() => caches.match(req).then(r => r || caches.match('/index.html')))
+    }).catch(() => caches.match(req).then(r => r || caches.match(new URL(req.url).pathname.startsWith('/worker') ? '/worker' : '/')))
   );
 });

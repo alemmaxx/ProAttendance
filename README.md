@@ -7,6 +7,13 @@ A worker attendance system sold as a subscription (SaaS) to many companies. Each
 - **Super Admin:** https://proattendancemy.web.app/superadmin.html
 - **QR kiosk:** opened from the admin's **Lokasi** page (`/qr.html?l=…`)
 
+## Links
+
+- **Admin / Boss / Finance:** https://proattendancemy.web.app (the login page has a Super Admin link)
+- **Staff (worker app):** https://proattendancemy.web.app/worker
+- **Super Admin:** https://proattendancemy.web.app/superadmin.html
+- `public/index.html` is a copy of `public/admin.html`; if you change one, change the other.
+
 ## Folder structure
 ```
 public/            → website (deployed to Firebase Hosting)

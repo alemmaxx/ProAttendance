@@ -105,7 +105,7 @@ function renderAuth(mode = 'login') {
           : `<button type="button" class="link-btn" data-m="login">← ${L('Kembali ke log masuk', 'Back to login')}</button>`}
       </div>
       <div class="divider"></div>
-      <p class="center small"><a href="/index.html">${L('Log masuk Pekerja', 'Staff login')}</a></p>
+      <p class="center small"><a href="/worker">${L('Log masuk Pekerja', 'Staff login')}</a></p>
     </form>
   </div>`;
   $$('[data-m]').forEach(b => b.onclick = () => renderAuth(b.dataset.m));
@@ -162,7 +162,7 @@ onAuthStateChanged(auth, async (u) => {
     }
     if (!meS.exists()) return renderOnboarding();
     S.me = meS.data();
-    if (S.me.role === 'worker') { location.href = '/index.html'; return; }
+    if (S.me.role === 'worker') { location.href = '/worker'; return; }
     if (S.me.role !== 'admin') { await signOut(auth); return; }
     S.cid = S.me.cid;
     startApp();
@@ -796,7 +796,7 @@ function loginText(wid, pin, name) {
 `Salam ${name},
 Akaun kehadiran ${S.company.name} anda telah dibuka.
 
-🔗 ${location.origin}
+🔗 ${location.origin}/worker
 🆔 ID Pekerja: ${wid}
 🔑 PIN sementara: ${pin}
 
@@ -804,7 +804,7 @@ Sila log masuk dan tukar PIN anda. Anda boleh "Add to Home Screen" untuk guna se
 `Hi ${name},
 Your ${S.company.name} attendance account is ready.
 
-🔗 ${location.origin}
+🔗 ${location.origin}/worker
 🆔 Staff ID: ${wid}
 🔑 Temporary PIN: ${pin}
 
@@ -1265,7 +1265,7 @@ function viewSettings() {
     <div class="set-row hide" id="pushRow"><span class="muted">${L('Notifikasi push (permohonan baharu)', 'Push notifications (new requests)')}</span>
       <button class="btn btn-sm btn-ghost" id="pushA">${L('Hidupkan', 'Turn on')}</button></div>
     <div class="set-row"><span class="muted">${L('Pautan login pekerja', 'Staff login link')}</span>
-      <button class="btn btn-sm btn-ghost" id="cpLink">${esc(location.host)} · ${L('Salin', 'Copy')}</button></div>
+      <button class="btn btn-sm btn-ghost" id="cpLink">${esc(location.host)}/worker · ${L('Salin', 'Copy')}</button></div>
   </div>`;
 
   let logo = c.logo || '';
@@ -1323,7 +1323,7 @@ function viewSettings() {
     const arr = [...new Set([...(S.company.departments || []), v])];
     await updateDoc(cRef(), { departments: arr }); S.company.departments = arr; $('#deptIn').value = ''; drawDepts();
   };
-  $('#cpLink').onclick = () => copyText(location.origin);
+  $('#cpLink').onclick = () => copyText(location.origin + '/worker');
 
   $('#logBtn').onclick = showLogs;
   $('#demoSeed').onclick = (e) => seedDemo(e.currentTarget);
@@ -2547,7 +2547,7 @@ function addAdmin() {
           await signOut(sa).catch(() => {});
           await setDoc(doc(db, 'users', cred.user.uid), { role: 'admin', cid: S.cid, email, perm: $('#aR', el).value, createdAt: serverTimestamp() });
           logAct('admin.add', email);
-          copyText(`${location.origin}/admin.html\n${email}\n${pw}`);
+          copyText(`${location.origin}/\n${email}\n${pw}`);
           toast(L('Admin ditambah. Maklumat login telah disalin.', 'Admin added. Login details copied.'), 'ok', 5000);
           drawAdmins();
         } catch (e) {
@@ -2800,7 +2800,7 @@ async function seedDemo(btn) {
         <li>${L('Kelulusan — 5 permohonan menunggu', 'Approvals — 5 pending requests')}</li>
         <li>${L('Gaji → Jana Gaji bulan ini → Kunci → lihat slip', 'Payroll → Generate this month → Lock → view slips')}</li>
         <li>${L('Laporan, Syif & Jadual, Tugasan, Fail HR', 'Reports, Shifts & Roster, Tasks, HR Files')}</li></ul>
-        <p><b>${L('Login pekerja demo', 'Demo staff login')}</b> (${location.origin}):<br>
+        <p><b>${L('Login pekerja demo', 'Demo staff login')}</b> (${location.origin}/worker):<br>
         ID <b class="mono">${workers[0].id}</b> / <b class="mono">${workers[1].id}</b> · PIN <b class="mono">123456</b></p>
         <p class="xs muted">${L('Kadar caruman demo hanyalah contoh — semak di Gaji → Tetapan Gaji sebelum guna sebenar.', 'Demo contribution rates are examples only — review them in Payroll → Settings before real use.')}</p>`
     });

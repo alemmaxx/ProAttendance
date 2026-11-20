@@ -1,7 +1,7 @@
 {
   "name": "ProAttendance Admin",
   "short_name": "PA Admin",
-  "start_url": "/admin.html",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0a1210",
@@ -25,6 +25,6 @@
       "type": "image/svg+xml"
     }
   ],
-  "id": "/admin.html",
+  "id": "/admin",
   "description": "Admin kehadiran, cuti, OT, tuntutan & gaji"
 }

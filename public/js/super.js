@@ -141,7 +141,7 @@ async function viewCompanies() {
     <div class="row">
       <a class="btn btn-primary" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Buka Admin Syarikat Saya', 'Open My Company Admin')}</a>
       <a class="btn btn-ghost" href="/admin.html?register=1" target="_blank">${icon('plus', 16)} ${L('Daftar Syarikat Demo Baharu', 'Register New Demo Company')}</a>
-      <a class="btn btn-ghost" href="/" target="_blank">${icon('users', 16)} ${L('Halaman Pekerja', 'Staff Page')}</a>
+      <a class="btn btn-ghost" href="/worker" target="_blank">${icon('users', 16)} ${L('Halaman Pekerja', 'Staff Page')}</a>
     </div>
   </div>
   <div class="card">

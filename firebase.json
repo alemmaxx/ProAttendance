@@ -26,6 +26,16 @@
           }
         ]
       }
+    ],
+    "rewrites": [
+      {
+        "source": "/worker",
+        "destination": "/worker.html"
+      },
+      {
+        "source": "/worker/**",
+        "destination": "/worker.html"
+      }
     ]
   },
   "firestore": [
