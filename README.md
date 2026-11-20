@@ -144,3 +144,15 @@ Admin → Settings → **Demo Data** → "Isi Data Demo". It fills the company w
   - Settings → **Borang Tuntutan — Kadar & Projek**: RM/km (0.80), outstation (15), overnight (25), offset (50), SST (8%), and a project list.
 
 - Admin → Settings: rates for **mileage (RM/km)**, **outstation (RM/day)** and **overnight (RM/night)**. Approvals shows a table of the receipt items with photos.
+
+
+## Fingerprint / Face ID login for staff (passkey)
+
+- After a staff member logs in once with ID + PIN, the app offers **Enable Fingerprint / Face ID**. They can also do this from Profil.
+- Next time they press **Log in with Fingerprint / Face ID**. No PIN is needed.
+- The public keys are stored in `passkeys/{credId}` (server only). Login works through `pa_passkeyAuthVerify`, which returns a custom token.
+- **One-time setup (Super Admin):** the custom token needs a permission. In Google Cloud Console (project kukusanmy):
+  1. Go to **IAM & Admin → IAM**.
+  2. Find `710803283811-compute@developer.gserviceaccount.com`, then **Edit**.
+  3. **Add role → Service Account Token Creator → Save**.
+  4. Also make sure the **IAM Service Account Credentials API** is enabled.

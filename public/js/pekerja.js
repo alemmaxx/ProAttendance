@@ -1,8 +1,8 @@
 // ProAttendance — Halaman Pekerja
-import { auth, db, workerEmail } from './fb.js';
+import { auth, db, workerEmail, call } from './fb.js';
 import { APP_VERSION } from './config.js';
 import {
-  signInWithEmailAndPassword, onAuthStateChanged, signOut, updatePassword
+  signInWithEmailAndPassword, signInWithCustomToken, onAuthStateChanged, signOut, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   doc, getDoc, getDocs, updateDoc, addDoc, setDoc, deleteDoc, collection, query, where, orderBy, limit, serverTimestamp, writeBatch
@@ -59,6 +59,7 @@ function renderLogin() {
         </div>
       </div>
       <button class="btn btn-primary btn-block" id="loginBtn" type="submit" data-ms="Log Masuk" data-en="Log In"></button>
+      ${pkSupported() ? `<button class="btn btn-soft btn-block" id="pkLogin" type="button" style="margin-top:.6rem">${icon('finger', 18)} ${L('Log masuk dengan Cap Jari / Face ID', 'Log in with Fingerprint / Face ID')}</button>` : ''}
       <p class="muted small center" style="margin-top:.9rem" data-ms="Lupa PIN? Sila hubungi majikan anda untuk reset." data-en="Forgot PIN? Ask your employer to reset it."></p>
       <div class="divider"></div>
       <p class="center small"><a href="/admin.html" data-ms="Log masuk Majikan / Admin" data-en="Employer / Admin login"></a></p>
@@ -95,11 +96,72 @@ function renderLogin() {
     busy(btn, true);
     try {
       await signInWithEmailAndPassword(auth, workerEmail(id), pin);
+      try { sessionStorage.setItem('pa_offer_pk', '1'); } catch {}
     } catch (err) {
       toast(authErr(err), 'bad');
       busy(btn, false);
     }
   };
+  if ($('#pkLogin')) { $('#pkLogin').onclick = (e) => passkeyLogin(e.currentTarget); pkPrep('auth'); }
+}
+
+// ---------------------------------------------------------------- CAP JARI / FACE ID (passkey)
+const PK_LIB = 'https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.1.0/+esm';
+function pkSupported() { return !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext); }
+const pkHas = () => { try { return !!localStorage.getItem('pa_pk'); } catch { return false; } };
+function pkErr(e) {
+  const n = e?.name || '';
+  if (n === 'NotAllowedError' || n === 'AbortError') return L('Dibatalkan atau tamat masa.', 'Cancelled or timed out.');
+  if (n === 'InvalidStateError') return L('Telefon ini sudah didaftarkan.', 'This phone is already registered.');
+  return e?.message || L('Gagal. Cuba lagi.', 'Failed. Try again.');
+}
+// Sediakan pustaka & cabaran lebih awal supaya Face ID / cap jari terus muncul bila butang ditekan (Safari perlukan ini)
+const pkCache = {};
+function pkPrep(kind) {
+  const c = pkCache[kind];
+  if (c && Date.now() - c.at < 240000) return c.p;
+  let hint = ''; try { hint = localStorage.getItem('pa_pk') || ''; } catch {}
+  const p = Promise.all([import(PK_LIB), kind === 'auth' ? call('pa_passkeyAuthOptions', { credId: hint }) : call('pa_passkeyRegOptions', {})]);
+  p.catch(() => { delete pkCache[kind]; });
+  pkCache[kind] = { p, at: Date.now() };
+  return p;
+}
+async function passkeyLogin(btn) {
+  busy(btn, true);
+  try {
+    const [{ startAuthentication }, { options, challengeId }] = await pkPrep('auth');
+    delete pkCache.auth;
+    const response = await startAuthentication({ optionsJSON: options });
+    const r = await call('pa_passkeyAuthVerify', { challengeId, response });
+    try { localStorage.setItem('pa_pk', response.id); } catch {}
+    await signInWithCustomToken(auth, r.token);
+  } catch (e) {
+    toast(pkErr(e), 'bad', 6000);
+    busy(btn, false);
+  }
+}
+async function passkeyRegister(btn) {
+  busy(btn, true);
+  try {
+    const [{ startRegistration }, { options, challengeId }] = await pkPrep('reg');
+    delete pkCache.reg;
+    const response = await startRegistration({ optionsJSON: options });
+    const r = await call('pa_passkeyRegVerify', { challengeId, response, device: navigator.userAgent });
+    try { localStorage.setItem('pa_pk', r.credId); } catch {}
+    toast(L('Cap jari / Face ID diaktifkan. Lain kali log masuk tanpa PIN.', 'Fingerprint / Face ID enabled. Next time log in without a PIN.'));
+    return true;
+  } catch (e) { toast(pkErr(e), 'bad', 6000); return false; }
+  finally { busy(btn, false); }
+}
+function offerPasskey() {
+  let flag = null; try { flag = sessionStorage.getItem('pa_offer_pk'); sessionStorage.removeItem('pa_offer_pk'); } catch {}
+  if (!flag || !pkSupported() || pkHas()) return;
+  pkPrep('reg');
+  modal({
+    title: L('Log masuk lebih mudah?', 'Easier login?'),
+    body: `<p>${L('Aktifkan log masuk dengan <b>cap jari, Face ID atau kunci skrin telefon</b>. Lain kali tidak perlu ingat PIN.', 'Enable login with <b>fingerprint, Face ID or your phone screen lock</b>. Next time no need to remember your PIN.')}</p>`,
+    actions: [{ label: L('Nanti', 'Later') }, { label: L('Aktifkan', 'Enable'), cls: 'btn-primary', onClick: () => { passkeyRegister(null); } }]
+  });
 }
 
 // ---------------------------------------------------------------- SESI
@@ -250,6 +312,7 @@ function renderShell() {
   </nav>`;
   $$('.bnav button').forEach(b => b.onclick = () => go(b.dataset.tab));
   go(S.tab);
+  setTimeout(offerPasskey, 1500);
 }
 document.addEventListener('langchange', () => { if (S.worker && $('#view')) renderShell(); else if ($('.login-wrap')) keepInputs(renderLogin); });
 
@@ -1503,12 +1566,21 @@ function viewProfil() {
     ${ph ? `<a class="btn btn-ok btn-block" target="_blank" rel="noopener" href="https://wa.me/${ph}?text=${encodeURIComponent(`Salam, saya ${w.name} (${S.me.workerId}).`)}">${icon('chat', 18)} ${L('WhatsApp Majikan', 'WhatsApp Employer')}</a>` : ''}
     <button class="btn btn-ghost btn-block hide" id="pushB">${icon('bell', 18)} ${L('Hidupkan notifikasi', 'Turn on notifications')}</button>
     ${installBtn('btn btn-soft btn-block')}
+    ${pkSupported() ? `<button class="btn btn-ghost btn-block" id="pkBtn">${icon('finger', 18)} ${pkHas() ? L('Cap jari / Face ID: AKTIF (tekan untuk buang)', 'Fingerprint / Face ID: ON (tap to remove)') : L('Aktifkan Cap Jari / Face ID', 'Enable Fingerprint / Face ID')}</button>` : ''}
     <button class="btn btn-ghost btn-block" id="chPin">${icon('shield', 18)} ${L('Tukar PIN', 'Change PIN')}</button>
     <button class="btn btn-ghost btn-block" id="langB">${L('Bahasa: Bahasa Melayu', 'Language: English')}</button>
     <button class="btn btn-danger btn-block" id="lo">${icon('out', 18)} ${L('Log Keluar', 'Log Out')}</button>
   </div>
   <p class="center xs muted" style="margin-top:1rem">ProAttendance · v${APP_VERSION}</p>`;
   $('#chPin').onclick = () => pinModal(false);
+  if ($('#pkBtn') && !pkHas()) pkPrep('reg');
+  $('#pkBtn') && ($('#pkBtn').onclick = async (e) => {
+    if (pkHas()) {
+      if (!await confirmBox(L('Buang log masuk cap jari / Face ID untuk akaun ini?', 'Remove fingerprint / Face ID login for this account?'))) return;
+      try { await call('pa_passkeyRemove', {}); localStorage.removeItem('pa_pk'); toast(L('Dibuang.', 'Removed.')); } catch (err) { toast(pkErr(err), 'bad'); }
+    } else await passkeyRegister(e.currentTarget);
+    viewProfil();
+  });
   $$('[data-myc]').forEach(r => r.onclick = () => claimEditor(r.dataset.myc, 's'));
   pushAvailable().then(ok => {
     const b = $('#pushB'); if (!ok || !b) return;

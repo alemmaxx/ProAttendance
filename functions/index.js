@@ -273,3 +273,123 @@ exports.pa_onTask = onDocumentCreated(TRIG('companies/{cid}/tasks/{tid}'), async
   const x = e.data?.data(); if (!x) return;
   await sendTo(e.params.cid, t => t.id === x.uid, 'Tugasan baharu', x.title || '', '/worker');
 });
+
+
+// ================================================================ LOG MASUK CAP JARI / FACE ID (passkey, WebAuthn)
+// Pekerja daftar sekali (selepas log masuk dengan ID + PIN), kemudian log masuk dengan
+// kunci skrin telefon. Kunci awam disimpan di passkeys/{credId}; cabaran di passkeyChallenges.
+const RP_ID = 'proattendancemy.web.app';
+const RP_NAME = 'ProAttendance';
+const ORIGINS = ['https://proattendancemy.web.app', 'https://proattendancemy.firebaseapp.com'];
+const swa = () => import('@simplewebauthn/server');
+const b64u = {
+  enc: (u8) => Buffer.from(u8).toString('base64url'),
+  dec: (s) => new Uint8Array(Buffer.from(String(s), 'base64url'))
+};
+async function newChallenge(data) {
+  const ref = db.collection('passkeyChallenges').doc();
+  await ref.set({ ...data, exp: Date.now() + 5 * 60 * 1000 });
+  return ref.id;
+}
+async function takeChallenge(id) {
+  if (!/^[A-Za-z0-9]{10,40}$/.test(String(id || ''))) throw new HttpsError('invalid-argument', 'Cabaran tidak sah.');
+  const ref = db.doc(`passkeyChallenges/${id}`);
+  const s = await ref.get();
+  if (!s.exists) throw new HttpsError('deadline-exceeded', 'Sesi tamat. Cuba lagi.');
+  await ref.delete();
+  const c = s.data();
+  if (c.exp < Date.now()) throw new HttpsError('deadline-exceeded', 'Sesi tamat. Cuba lagi.');
+  return c;
+}
+async function requireWorker(req) {
+  if (!req.auth) throw new HttpsError('unauthenticated', 'Sila log masuk.');
+  const s = await db.doc(`users/${req.auth.uid}`).get();
+  const me = s.exists ? s.data() : null;
+  if (!me || me.role !== 'worker' || !me.cid || !me.workerId) throw new HttpsError('permission-denied', 'Hanya akaun pekerja.');
+  return me;
+}
+
+exports.pa_passkeyRegOptions = onCall({ region: REGION }, async (req) => {
+  const me = await requireWorker(req);
+  const { generateRegistrationOptions } = await swa();
+  const mine = await db.collection('passkeys').where('uid', '==', req.auth.uid).get();
+  const opts = await generateRegistrationOptions({
+    rpName: RP_NAME, rpID: RP_ID,
+    userName: me.workerId, userDisplayName: me.name || me.workerId,
+    userID: new TextEncoder().encode(req.auth.uid),
+    attestationType: 'none',
+    excludeCredentials: mine.docs.map(d => ({ id: d.id, transports: d.data().transports || [] })),
+    authenticatorSelection: { residentKey: 'required', userVerification: 'required', authenticatorAttachment: 'platform' }
+  });
+  const challengeId = await newChallenge({ kind: 'reg', uid: req.auth.uid, challenge: opts.challenge });
+  return { options: opts, challengeId };
+});
+
+exports.pa_passkeyRegVerify = onCall({ region: REGION }, async (req) => {
+  const me = await requireWorker(req);
+  const c = await takeChallenge(req.data?.challengeId);
+  if (c.kind !== 'reg' || c.uid !== req.auth.uid) throw new HttpsError('permission-denied', 'Cabaran tidak sepadan.');
+  const { verifyRegistrationResponse } = await swa();
+  let v;
+  try {
+    v = await verifyRegistrationResponse({ response: req.data?.response, expectedChallenge: c.challenge, expectedOrigin: ORIGINS, expectedRPID: RP_ID, requireUserVerification: true });
+  } catch (e) { throw new HttpsError('invalid-argument', 'Pendaftaran gagal: ' + (e.message || e)); }
+  if (!v.verified || !v.registrationInfo) throw new HttpsError('invalid-argument', 'Pendaftaran tidak sah.');
+  const cr = v.registrationInfo.credential;
+  await db.doc(`passkeys/${cr.id}`).set({
+    uid: req.auth.uid, cid: me.cid, workerId: me.workerId,
+    publicKey: b64u.enc(cr.publicKey), counter: cr.counter || 0, transports: cr.transports || [],
+    device: String(req.data?.device || '').slice(0, 120), createdAt: FieldValue.serverTimestamp()
+  });
+  return { ok: true, credId: cr.id };
+});
+
+exports.pa_passkeyAuthOptions = onCall({ region: REGION }, async (req) => {
+  const { generateAuthenticationOptions } = await swa();
+  const hint = String(req.data?.credId || '');
+  const opts = await generateAuthenticationOptions({
+    rpID: RP_ID, userVerification: 'required',
+    allowCredentials: /^[A-Za-z0-9_-]{10,512}$/.test(hint) ? [{ id: hint }] : []
+  });
+  const challengeId = await newChallenge({ kind: 'auth', challenge: opts.challenge });
+  return { options: opts, challengeId };
+});
+
+exports.pa_passkeyAuthVerify = onCall({ region: REGION }, async (req) => {
+  const c = await takeChallenge(req.data?.challengeId);
+  if (c.kind !== 'auth') throw new HttpsError('permission-denied', 'Cabaran tidak sepadan.');
+  const resp = req.data?.response;
+  const id = String(resp?.id || '');
+  if (!/^[A-Za-z0-9_-]{10,512}$/.test(id)) throw new HttpsError('invalid-argument', 'Kelayakan tidak sah.');
+  const ref = db.doc(`passkeys/${id}`);
+  const s = await ref.get();
+  if (!s.exists) throw new HttpsError('not-found', 'Cap jari / Face ID ini belum didaftarkan. Log masuk dengan ID & PIN, kemudian aktifkan semula di Profil.');
+  const pk = s.data();
+  const { verifyAuthenticationResponse } = await swa();
+  let v;
+  try {
+    v = await verifyAuthenticationResponse({
+      response: resp, expectedChallenge: c.challenge, expectedOrigin: ORIGINS, expectedRPID: RP_ID, requireUserVerification: true,
+      credential: { id, publicKey: b64u.dec(pk.publicKey), counter: pk.counter || 0, transports: pk.transports || [] }
+    });
+  } catch (e) { throw new HttpsError('permission-denied', 'Pengesahan gagal: ' + (e.message || e)); }
+  if (!v.verified) throw new HttpsError('permission-denied', 'Pengesahan gagal.');
+  // Pekerja masih aktif?
+  const w = await db.doc(`companies/${pk.cid}/workers/${pk.workerId}`).get();
+  if (!w.exists || w.data().active === false || w.data().uid !== pk.uid) throw new HttpsError('permission-denied', 'Akaun pekerja tidak aktif.');
+  await ref.update({ counter: v.authenticationInfo.newCounter || 0, lastUsed: FieldValue.serverTimestamp() });
+  let token;
+  try { token = await getAuth().createCustomToken(pk.uid); }
+  catch (e) {
+    console.error('createCustomToken', e);
+    throw new HttpsError('failed-precondition', 'Log masuk cap jari belum disediakan sepenuhnya oleh pentadbir sistem (kebenaran token). Sila guna ID & PIN.');
+  }
+  return { token, workerId: pk.workerId };
+});
+
+exports.pa_passkeyRemove = onCall({ region: REGION }, async (req) => {
+  await requireWorker(req);
+  const mine = await db.collection('passkeys').where('uid', '==', req.auth.uid).get();
+  await Promise.all(mine.docs.map(d => d.ref.delete()));
+  return { removed: mine.size };
+});
