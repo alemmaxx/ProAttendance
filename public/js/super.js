@@ -88,12 +88,12 @@ function renderShell() {
     <aside class="side" id="side">
       <div class="side-brand"><img class="logo" src="/icon.svg" alt="ProAttendance" style="background:none;border:0;padding:0"><div><div class="nm">ProAttendance</div><div class="xs" style="opacity:.7">Super Admin</div></div></div>
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span>${t}</span></button>`).join('')}</nav>
-      <div class="side-foot"><div class="xs" style="opacity:.75">${esc(S.user.email)}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div><button class="btn btn-sm btn-ghost btn-block" id="manBtn" style="margin:.3rem 0">📘 ${L('Manual', 'Manual')}</button>${installBtn('btn btn-sm btn-soft btn-block')}
-        <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${L('Keluar', 'Logout')}</button></div></div>
+      <div class="side-foot"><div class="sf-mail" title="${esc(S.user.email)}">${esc(S.user.email)}</div><div class="sf-row"><button class="btn btn-sm btn-ghost" id="manBtn">📘 ${L('Manual', 'Manual')}</button>${installBtn('btn btn-sm btn-soft')}</div>
+        <div class="sf-row">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${L('Keluar', 'Logout')}</button></div></div>
     </aside>
     <div class="side-bg" id="sideBg"></div>
     <div class="main">
-      <header class="topbar"><button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button><h1 id="vTitle"></h1>
+      <header class="topbar"><button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button><h1 id="vTitle"></h1><span class="ver">v${APP_VERSION}</span>
         <a class="btn btn-sm btn-primary" href="/admin.html" target="_blank">${icon('building', 16)} ${L('Admin Syarikat', 'Company Admin')}</a></header>
       <div class="content"><div class="pghero no-print"><div class="tag" id="vTag"></div><h2 class="gold-h" id="vH"></h2><p class="sub" id="vSub"></p></div><div id="view"></div></div>
     </div>

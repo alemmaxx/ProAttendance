@@ -325,10 +325,9 @@ function renderShell() {
       ${isOwner() && !S.me.support ? `<div style="padding:.5rem .8rem"><select class="input" id="coSwitch" style="font-size:.85rem;padding:.4rem .6rem;min-height:38px"></select></div>` : ''}
       <nav>${NAV().map(([k, ic, t]) => `<button data-v="${k}">${icon(ic)}<span class="grow">${t}</span>${k === 'approvals' ? '<span class="badge b-warn hide" id="pendBadge"></span>' : ''}</button>`).join('')}</nav>
       <div class="side-foot">
-        <div class="xs" style="opacity:.75;word-break:break-all">${esc(S.user.email || '')}</div><div class="xs" style="opacity:.55">v${APP_VERSION}</div>
-        <button class="btn btn-sm btn-ghost btn-block" id="manBtn">📘 ${L('Manual Pengguna', 'User Manual')}</button>
-        ${installBtn('btn btn-sm btn-soft btn-block')}
-        <div class="row" style="margin-top:.5rem">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 16)} ${L('Keluar', 'Logout')}</button></div>
+        <div class="sf-mail" title="${esc(S.user.email || '')}">${esc(S.user.email || '')}</div>
+        <div class="sf-row"><button class="btn btn-sm btn-ghost" id="manBtn">📘 ${L('Manual', 'Manual')}</button>${installBtn('btn btn-sm btn-soft')}</div>
+        <div class="sf-row">${langBtn()}<button class="btn btn-sm btn-ghost" id="lo">${icon('out', 15)} ${L('Keluar', 'Logout')}</button></div>
       </div>
     </aside>
     <div class="side-bg" id="sideBg"></div>
@@ -337,6 +336,7 @@ function renderShell() {
         <button class="icon-btn menu-btn" id="menuBtn">${icon('menu', 22)}</button>
         <h1 id="vTitle"></h1>
         <span id="subBadge"></span>
+        <span class="ver">v${APP_VERSION}</span>
       </header>
       <div class="content"><div class="pghero no-print"><div class="tag" id="vTag"></div><h2 class="gold-h" id="vH"></h2><p class="sub" id="vSub"></p></div><div id="view"></div></div>
     </div>
