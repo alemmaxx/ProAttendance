@@ -153,6 +153,14 @@ service cloud.firestore {
         // Admin boleh tambah rekod manual (cth: pembetulan punch diluluskan)
         allow create: if isAdminOf(cid);
         allow update, delete: if isFullAdmin(cid);
+        // Penyelia boleh buang rekod keluar AUTO bila meluluskan pembetulan "Tamat Kerja"
+        allow delete: if isAdminOf(cid) && resource.data.get('auto', false) == true && resource.data.type in ['out', 'break_out'];
+      }
+      // Cache nama tempat (koordinat dibundar ~100 m) — dikongsi dalam syarikat
+      match /geocache/{gid} {
+        allow read: if isAdminOf(cid) || isWorkerOf(cid);
+        allow create, update: if (isAdminOf(cid) || isWorkerOf(cid)) && request.resource.data.keys().hasOnly(['name', 'at'])
+          && request.resource.data.name is string && request.resource.data.name.size() <= 120;
       }
 
       // Gambar selfie punch (disimpan berasingan supaya laporan ringan)

@@ -146,7 +146,28 @@ async function savePlan(date, lines) {
   await setDoc(ref, { uid: S.user.uid, workerId: S.me.workerId, name: S.worker.name, date, note, at: serverTimestamp() });
   S.plans = S.plans || {}; S.plans[date] = note;
 }
+// Nama tempat dengan cache (telefon + dikongsi syarikat) supaya tidak memanggil peta berulang kali
 async function placeName(lat, lng) {
+  const key = `${lat.toFixed(3)}_${lng.toFixed(3)}`;
+  let local = {};
+  try { local = JSON.parse(localStorage.getItem('pa_geo') || '{}'); } catch { /* */ }
+  if (local[key]) return local[key];
+  const keep = (n) => {
+    if (!n) return n;
+    local[key] = n;
+    const ks = Object.keys(local); if (ks.length > 300) ks.slice(0, ks.length - 300).forEach(k => delete local[k]);
+    try { localStorage.setItem('pa_geo', JSON.stringify(local)); } catch { /* */ }
+    return n;
+  };
+  try {
+    const g = await getDoc(doc(db, 'companies', S.cid, 'geocache', key));
+    if (g.exists() && g.data().name) return keep(g.data().name);
+  } catch { /* */ }
+  const n = await placeNameFetch(lat, lng);
+  if (n) { keep(n); setDoc(doc(db, 'companies', S.cid, 'geocache', key), { name: n, at: serverTimestamp() }).catch(() => {}); }
+  return n;
+}
+async function placeNameFetch(lat, lng) {
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=${lat}&lon=${lng}&accept-language=ms,en`, { headers: { Accept: 'application/json' } });
     const j = await r.json(), a = j.address || {};
@@ -450,9 +471,16 @@ function nextActions() {
   return { main: 'out', alt: S.company.settings?.autoBreak ? [] : ['break_in'], sum };
 }
 
+// Lokasi yang dibenarkan untuk pekerja ini (kosong = semua lokasi syarikat)
+function allowedLocs() {
+  const ids = Array.isArray(S.worker.locIds) && S.worker.locIds.length ? S.worker.locIds : (S.worker.branchId ? [S.worker.branchId] : []);
+  if (!ids.length) return S.locations;
+  const l = S.locations.filter(x => ids.includes(x.id));
+  return l.length ? l : S.locations;
+}
 function myLocation() {
-  if (S.worker.branchId) return S.locations.find(l => l.id === S.worker.branchId) || null;
-  return null;
+  const a = allowedLocs();
+  return a.length === 1 && a !== S.locations ? a[0] : null;
 }
 
 function todayStatusHtml() {
@@ -482,7 +510,7 @@ function viewHome() {
     ${alt.map(a => `<button class="btn btn-ghost" data-alt="${a}">${TYPE_LABEL[a]()}</button>`).join('')}
     ${S.company.settings?.visits ? `<button class="btn btn-ghost hide" id="visitBtn">${icon('pin', 16)} ${L('Update Kerja', 'Work Update')}${S.visits?.length ? ` (${S.visits.length})` : ''}</button>` : ''}
     <p class="small muted" style="margin-top:.8rem">
-      ${icon('pin', 15)} ${loc ? esc(loc.name) + ' · ' + METHOD_LABEL[loc.mode || 'button']() : (S.locations.length ? L('Pilih lokasi semasa punch', 'Choose location when punching') : L('Tiada lokasi ditetapkan', 'No location set'))}
+      ${icon('pin', 15)} ${loc ? esc(loc.name) + ' · ' + METHOD_LABEL[loc.mode || 'button']() : (allowedLocs().length ? (allowedLocs() !== S.locations ? allowedLocs().map(l => esc(l.name)).join(' / ') : L('Pilih lokasi semasa punch', 'Choose location when punching')) : L('Tiada lokasi ditetapkan', 'No location set'))}
     </p>
   </div>
   <div class="stats" style="margin-top:1rem">
@@ -607,7 +635,7 @@ function upcomingHtml() {
 
 function pickLocation(pos) {
   return new Promise(resolve => {
-    let list = [...S.locations];
+    let list = [...allowedLocs()];
     if (pos) list = list.map(l => ({ ...l, _d: (l.lat != null && l.lng != null) ? haversine(pos.lat, pos.lng, l.lat, l.lng) : null }))
       .sort((a, b) => (a._d ?? 1e12) - (b._d ?? 1e12));
     let done = false;
@@ -641,8 +669,9 @@ async function punch(type, btn) {
     const posP = getPosition(12000).then(p => (pos = p)).catch(() => null);
 
     let loc = myLocation();
-    if (!loc && S.locations.length === 1) loc = S.locations[0];
-    if (!loc && S.locations.length > 1) {
+    const allowed = allowedLocs();
+    if (!loc && allowed.length === 1) loc = allowed[0];
+    if (!loc && allowed.length > 1) {
       await Promise.race([posP, new Promise(r => setTimeout(r, 2500))]);
       loc = await pickLocation(pos);
       if (loc === undefined) return;
@@ -664,6 +693,7 @@ async function punch(type, btn) {
       if (!text) return;
       const r = await verifyQr(text, S.cid, S.locations);
       if (!r.ok) { toast(r.err, 'bad', 5000); return; }
+      if (r.loc && !allowed.some(l => l.id === r.loc.id)) { toast(L(`Anda tidak ditetapkan untuk punch di ${r.loc.name}.`, `You are not assigned to punch at ${r.loc.name}.`), 'bad', 5000); return; }
       loc = r.loc;
     }
     if (!pos) await Promise.race([posP, new Promise(r => setTimeout(r, 1500))]);

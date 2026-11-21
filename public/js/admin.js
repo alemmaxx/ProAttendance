@@ -717,8 +717,10 @@ function workerForm(w) {
         <div class="field"><label class="lbl">${L('Jawatan', 'Position')}</label><input class="input" name="position" value="${esc(w.position || '')}"></div>
         <div class="field"><label class="lbl">${L('Jabatan', 'Department')}</label>
           <select class="input" name="dept"><option value="">—</option>${(c.departments || []).map(d => `<option ${d === w.dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></div>
-        <div class="field"><label class="lbl">${L('Lokasi kerja', 'Work location')}</label>
+        <div class="field"><label class="lbl">${L('Lokasi utama', 'Main location')}</label>
           <select class="input" name="branchId"><option value="">${L('Mana-mana lokasi', 'Any location')}</option>${S.locations.map(l => `<option value="${l.id}" ${l.id === w.branchId ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>
+        ${S.locations.length > 1 ? `<div class="field" style="grid-column:1/-1"><label class="lbl">${L('Lokasi dibenarkan punch (kosong = ikut lokasi utama / semua)', 'Locations allowed for punching (none = main location / all)')}</label>
+          <div class="row">${S.locations.map(l => `<label class="check"><input type="checkbox" data-wloc="${l.id}" ${(w.locIds || []).includes(l.id) ? 'checked' : ''}>${esc(l.name)}</label>`).join('')}</div></div>` : ''}
         <div class="field"><label class="lbl">${L('Tarikh mula kerja', 'Start date')}</label><input class="input" name="startDate" type="date" value="${esc(w.startDate || '')}"></div>
         <div class="field"><label class="lbl">${L('Jenis gaji', 'Pay type')}</label><select class="input" name="payType">${opts(PAY_TYPES(), w.payType || 'monthly')}</select></div>
         <div class="field"><label class="lbl">${L('Kadar gaji asas (RM)', 'Basic pay rate (RM)')}</label><input class="input" name="salary" type="number" step="0.01" min="0" value="${w.salary ?? ''}"></div>
@@ -730,6 +732,7 @@ function workerForm(w) {
         <div class="field"><label class="lbl">${L('No. KWSP', 'EPF no.')}</label><input class="input" name="epfNo" value="${esc(w.epfNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. PERKESO', 'SOCSO no.')}</label><input class="input" name="socsoNo" value="${esc(w.socsoNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. cukai (LHDN)', 'Tax no. (LHDN)')}</label><input class="input" name="taxNo" value="${esc(w.taxNo || '')}"></div>
+        <div class="field"><label class="lbl">${L('Kod negara (pekerja asing, cth: ID, BD, NP)', 'Country code (foreign staff, e.g. ID, BD, NP)')}</label><input class="input" name="countryCode" maxlength="2" value="${esc(w.countryCode || '')}" style="text-transform:uppercase"></div>
         <div class="field"><label class="lbl">${L('No. Tabung Haji (pilihan)', 'Tabung Haji no. (optional)')}</label><input class="input" name="thNo" value="${esc(w.thNo || '')}"></div>
         <div class="field"><label class="lbl">${L('No. ASB (pilihan)', 'ASB no. (optional)')}</label><input class="input" name="asbNo" value="${esc(w.asbNo || '')}"></div>
         <div class="field"><label class="lbl">${L('Status (untuk caruman)', 'Status (for contributions)')}</label><select class="input" name="nationality">${opts([['citizen', L('Warganegara', 'Citizen')], ['pr', L('Pemastautin Tetap (PR)', 'Permanent Resident (PR)')], ['foreign', L('Pekerja asing', 'Foreign worker')]], w.nationality || 'citizen')}</select></div>
@@ -797,11 +800,11 @@ async function saveWorker(el, w) {
   const fd = Object.fromEntries(new FormData(f).entries());
   const data = {
     name: fd.name.trim(), photo: fd.photo || '', ic: fd.ic.trim(), phone: fd.phone.trim(), email: fd.email.trim(), dob: fd.dob || '',
-    position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, startDate: fd.startDate || '',
+    position: fd.position.trim(), dept: fd.dept, branchId: fd.branchId || null, locIds: $$('[data-wloc]', el).filter(x => x.checked).map(x => x.dataset.wloc), startDate: fd.startDate || '',
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
     thNo: (fd.thNo || '').trim(), asbNo: (fd.asbNo || '').trim(),
-    nationality: fd.nationality || 'citizen', socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
+    nationality: fd.nationality || 'citizen', countryCode: String(fd.countryCode || '').trim().toUpperCase().slice(0, 2), socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
     allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp(),
     defaultShift: fd.defaultShift || '',
     workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],
@@ -1063,6 +1066,7 @@ function viewReports() {
       <button class="btn btn-primary" id="rgo">${icon('chart', 18)} ${L('Jana Laporan', 'Generate')}</button>
       <button class="btn btn-ghost" id="rxl" disabled>${icon('dl', 18)} Excel</button>
       <button class="btn btn-ghost" id="rpr" disabled>${icon('print', 18)} ${L('Cetak / PDF', 'Print / PDF')}</button>
+      <button class="btn btn-soft" id="rpdf" disabled>${icon('doc', 18)} ${L('PDF setiap pekerja', 'PDF per staff')}</button>
       <button class="btn btn-soft" id="rTrail">${icon('pin', 18)} ${L('Jejak Lokasi', 'Location Trail')}</button>
     </div>
   </div>
@@ -1192,9 +1196,45 @@ async function genReport() {
       $('#rtSum').classList.toggle('hide', b.dataset.rt !== 'sum');
       $('#rtDay').classList.toggle('hide', b.dataset.rt !== 'day');
     });
-    $('#rxl').disabled = false; $('#rpr').disabled = false;
+    $('#rxl').disabled = false; $('#rpr').disabled = false; $('#rpdf').disabled = false;
+    $('#rpdf').onclick = () => openPrint(staffReportHtml()) || toast(L('Benarkan pop-up untuk cetak.', 'Allow pop-ups to print.'), 'warn');
     $('#rxl').onclick = exportExcel;
   } catch (e) { console.error(e); out.innerHTML = `<div class="empty">${esc(authErr(e))}</div>`; }
+}
+
+// Laporan bulanan setiap pekerja (satu halaman seorang) — untuk ditandatangani / difailkan
+function staffReportHtml() {
+  const c = S.company, R = REPORT;
+  const logo = c.logo ? `<img src="${c.logo}" alt="" style="height:44px;width:44px;object-fit:contain;border-radius:8px">` : '';
+  const pages = R.summary.map(sm => {
+    const w = S.workers.find(x => x.id === sm.id) || {};
+    const rows = R.daily.filter(r => r.workerId === sm.id);
+    return `<section class="pg">
+      <div class="hd">${logo}<div><h1>${esc(c.name)}</h1><div class="sub">${L('Laporan Kehadiran Bulanan', 'Monthly Attendance Report')} · ${fmtDate(R.from)} – ${fmtDate(R.to)}</div></div></div>
+      <table class="info"><tr><td><b>${L('Nama', 'Name')}</b></td><td>${esc(sm.name)}</td><td><b>ID</b></td><td>${esc(sm.id)}</td></tr>
+        <tr><td><b>${L('Jawatan', 'Position')}</b></td><td>${esc(w.position || '-')}</td><td><b>${L('Jabatan', 'Department')}</b></td><td>${esc(sm.dept || '-')}</td></tr></table>
+      <div class="boxes">
+        <div><b>${sm.present}</b><span>${L('Hadir', 'Present')}</span></div><div><b>${sm.leave || 0}</b><span>${L('Cuti', 'Leave')}</span></div>
+        <div><b>${sm.absent}</b><span>${L('Tidak hadir', 'Absent')}</span></div><div><b>${sm.lateDays}</b><span>${L('Hari lewat', 'Late days')} (${sm.lateMin}m)</span></div>
+        <div><b>${minsToHM(sm.workMin)}</b><span>${L('Jam kerja', 'Work hours')}</span></div><div><b>${r2(sm.ot.normal + sm.ot.rest + sm.ot.holiday)}j</b><span>OT ${L('diluluskan', 'approved')}</span></div>
+      </div>
+      <table class="d"><thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Masuk', 'In')}</th><th>${L('Keluar', 'Out')}</th><th>${L('Rehat', 'Break')}</th><th>${L('Jam kerja', 'Hours')}</th><th>${L('Lewat', 'Late')}</th><th>${L('Lokasi', 'Location')}</th></tr></thead>
+        <tbody>${rows.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${fmtTime(r.firstIn)}</td><td>${r.open ? '-' : fmtTime(r.lastOut)}</td><td>${Math.round(r.breakMin)}m</td><td>${minsToHM(r.workMin)}</td><td>${r.lateMin ? r.lateMin + 'm' : ''}</td><td>${esc(r.locName || '')}</td></tr>`).join('') || `<tr><td colspan="7" style="text-align:center">${L('Tiada rekod', 'No records')}</td></tr>`}</tbody></table>
+      <div class="sig"><div>${L('Disediakan oleh', 'Prepared by')}</div><div>${L('Tandatangan pekerja', 'Staff signature')}</div><div>${L('Disahkan oleh', 'Verified by')}</div></div>
+    </section>`;
+  }).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(c.name)} — ${L('Laporan Kehadiran', 'Attendance Report')}</title><style>
+    body{font:12px/1.4 Arial,Helvetica,sans-serif;color:#111;margin:0}
+    .pg{padding:18mm 14mm;page-break-after:always}.pg:last-child{page-break-after:auto}
+    .hd{display:flex;gap:12px;align-items:center;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:10px}
+    h1{font-size:17px;margin:0}.sub{color:#444}
+    .info{width:100%;border-collapse:collapse;margin-bottom:10px}.info td{padding:3px 6px;border:1px solid #ccc}
+    .boxes{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:10px}
+    .boxes div{border:1px solid #ccc;border-radius:6px;padding:6px;text-align:center}.boxes b{display:block;font-size:15px}.boxes span{font-size:10px;color:#555}
+    .d{width:100%;border-collapse:collapse}.d th,.d td{border:1px solid #bbb;padding:3px 5px;text-align:left}.d th{background:#f1f1f1}
+    .sig{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:40px}.sig div{border-top:1px solid #111;padding-top:4px;text-align:center}
+    @page{size:A4;margin:0}
+  </style></head><body>${pages}</body></html>`;
 }
 
 function exportExcel() {
@@ -1276,6 +1316,10 @@ function viewSettings() {
     <div class="grid2">
       <div class="field"><label class="lbl">${L('Nama syarikat', 'Company name')}</label><input class="input" id="sName" value="${esc(c.name)}"></div>
       <div class="field"><label class="lbl">${L('No. pendaftaran (SSM)', 'Registration no. (SSM)')}</label><input class="input" id="sSsm" value="${esc(c.ssm || '')}"></div>
+      <div class="field"><label class="lbl">${L('No. majikan KWSP', 'EPF employer no.')}</label><input class="input" id="sEpfE" value="${esc(c.epfEmp || '')}"></div>
+      <div class="field"><label class="lbl">${L('Kod majikan PERKESO', 'SOCSO employer code')}</label><input class="input" id="sSocE" maxlength="12" value="${esc(c.socsoEmp || '')}"></div>
+      <div class="field"><label class="lbl">${L('No. E majikan (LHDN)', 'Employer E no. (LHDN)')}</label><input class="input" id="sTaxE" placeholder="E 1234567890" value="${esc(c.taxEmp || '')}"></div>
+      <div class="field"><label class="lbl">${L('No. E ibu pejabat (jika lain)', 'HQ E no. (if different)')}</label><input class="input" id="sTaxHq" value="${esc(c.taxEmpHq || '')}"></div>
       <div class="field"><label class="lbl">${L('No. telefon', 'Phone no.')}</label><input class="input" id="sPhone" inputmode="tel" value="${esc(c.phone || '')}"></div>
       <div class="field"><label class="lbl">${L('E-mel syarikat', 'Company email')}</label><input class="input" id="sEmail" type="email" value="${esc(c.email || c.ownerEmail || '')}"></div>
       <div class="field"><label class="lbl">${L('No. faks (pilihan)', 'Fax no. (optional)')}</label><input class="input" id="sFax" inputmode="tel" value="${esc(c.fax || '')}"></div>
@@ -1427,7 +1471,7 @@ function viewSettings() {
     busy(e.currentTarget, true);
     try {
       const b = writeBatch(db);
-      b.update(cRef(), { name, logo, color, stamp, ssm: $('#sSsm').value.trim(), phone: $('#sPhone').value.trim(), fax: $('#sFax').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim() });
+      b.update(cRef(), { name, logo, color, stamp, ssm: $('#sSsm').value.trim(), epfEmp: $('#sEpfE').value.trim(), socsoEmp: $('#sSocE').value.trim().toUpperCase(), taxEmp: $('#sTaxE').value.trim(), taxEmpHq: $('#sTaxHq').value.trim(), phone: $('#sPhone').value.trim(), fax: $('#sFax').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim() });
       b.update(doc(db, 'companyCodes', c.code), { name, logo, color });
       await b.commit();
       logAct('settings.profile', name);
@@ -1829,6 +1873,7 @@ function viewApprovals() {
     <div class="tabs">
       <button data-atab="pending">${L('Menunggu', 'Pending')} <span class="badge b-warn" id="apCount">${S.pending.length}</span></button>
       <button data-atab="history">${L('Sejarah', 'History')}</button>
+      <button data-atab="lcal">📅 ${L('Kalendar Cuti', 'Leave Calendar')}</button>
     </div>
     <div id="apBody"></div>`;
   $$('[data-atab]').forEach(b => {
@@ -1849,6 +1894,7 @@ async function drawApprovals() {
       S.apApproved = s.docs.map(d => ({ id: d.id, ...d.data() }));
     } catch { S.apApproved = []; }
   }
+  if (S.apTab === 'lcal') return leaveCalendar(box);
   let list;
   if (S.apTab === 'pending') list = S.pending;
   else {
@@ -1907,10 +1953,55 @@ async function drawApprovals() {
   $$('[data-rej]', box).forEach(b => b.onclick = () => decide(list.find(r => r.id === b.dataset.rej), false));
 }
 
+// Kalendar cuti pasukan — siapa cuti (diluluskan & menunggu) setiap hari
+function leaveCalendar(box, month) {
+  S.lcMonth = month || S.lcMonth || todayStr().slice(0, 7);
+  const ym = S.lcMonth, [y, mo] = ym.split('-').map(Number);
+  const first = new Date(y, mo - 1, 1), days = new Date(y, mo, 0).getDate();
+  const reqs = [...(S.apApproved || []), ...S.pending].filter(r => r.kind === 'leave');
+  const by = {};
+  reqs.forEach(r => dateRange(r.from, r.to || r.from).forEach(d => { if (d.startsWith(ym)) (by[d] = by[d] || []).push(r); }));
+  const hol = holidayMap(S.company);
+  const lead = (first.getDay() + 6) % 7;
+  const max = Math.max(1, ...Object.values(by).map(a => a.length));
+  box.innerHTML = `<div class="card">
+    <div class="row between" style="margin-bottom:.6rem">
+      <div class="row"><button class="btn btn-sm btn-ghost" id="lcP">‹</button><b>${esc(periodLabel(ym))}</b><button class="btn btn-sm btn-ghost" id="lcN">›</button></div>
+      <div class="row xs"><span class="badge b-ok">${L('Diluluskan', 'Approved')}</span><span class="badge b-warn">${L('Menunggu', 'Pending')}</span></div>
+    </div>
+    <div class="lcal">${['Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab', 'Ahd'].map((d, i) => `<div class="cal-h">${dayName((i + 1) % 7)}</div>`).join('')}
+      ${'<div></div>'.repeat(lead)}
+      ${Array.from({ length: days }, (_, i) => {
+        const d = `${ym}-${String(i + 1).padStart(2, '0')}`, list = by[d] || [];
+        const heat = list.length ? Math.min(1, list.length / Math.max(3, max)) : 0;
+        return `<div class="lc-day ${d === todayStr() ? 'today' : ''}" style="${heat ? `background:rgba(217,180,74,${0.08 + heat * 0.25})` : ''}">
+          <div class="row between" style="flex-wrap:nowrap"><b>${i + 1}</b>${list.length ? `<span class="badge">${list.length}</span>` : ''}</div>
+          ${hol[d] ? `<div class="xs" style="color:var(--info)">${esc(hol[d])}</div>` : ''}
+          ${list.slice(0, 4).map(r => `<div class="lc-p ${r.status === 'approved' ? 'ok' : 'wait'}" title="${esc(r.name)} · ${esc(r.typeName || '')}">${esc((r.name || '').split(' ')[0])}</div>`).join('')}
+          ${list.length > 4 ? `<div class="xs muted">+${list.length - 4}</div>` : ''}</div>`;
+      }).join('')}
+    </div>
+    <p class="xs muted" style="margin-top:.6rem">${L('Warna lebih gelap = lebih ramai bercuti pada hari itu. Semak sebelum meluluskan cuti baharu.', 'Darker = more people on leave that day. Check before approving new leave.')}</p></div>`;
+  const shift = (k) => { const d = new Date(y, mo - 1 + k, 1); leaveCalendar(box, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); };
+  $('#lcP').onclick = () => shift(-1); $('#lcN').onclick = () => shift(1);
+}
+
+// Siapa lagi cuti pada tarikh yang sama (untuk amaran semasa lulus)
+function leaveOverlap(r) {
+  if (r.kind !== 'leave') return '';
+  const ds = new Set(dateRange(r.from, r.to || r.from));
+  const others = [...(S.apApproved || []), ...S.pending].filter(x => x.kind === 'leave' && x.id !== r.id && x.workerId !== r.workerId
+    && dateRange(x.from, x.to || x.from).some(d => ds.has(d)));
+  if (!others.length) return `<p class="xs muted">✓ ${L('Tiada pekerja lain bercuti pada tarikh ini.', 'No other staff on leave on these dates.')}</p>`;
+  return `<div class="card small" style="border-color:var(--warn);padding:.6rem .8rem">⚠️ <b>${L('Turut bercuti pada tarikh sama:', 'Also on leave on the same dates:')}</b>
+    ${others.slice(0, 8).map(x => `<div>${esc(x.name)} · ${fmtDate(x.from)}${x.to && x.to !== x.from ? '–' + fmtDate(x.to) : ''} ${x.status === 'approved' ? '' : `<span class="badge b-warn">${L('menunggu', 'pending')}</span>`}</div>`).join('')}</div>`;
+}
+
 function decide(r, ok) {
   modal({
     title: ok ? L('Luluskan permohonan', 'Approve request') : L('Tolak permohonan', 'Reject request'),
     body: `<p class="small"><b>${esc(r.name)}</b> · ${REQ_LABEL[r.kind]()}</p>
+      ${ok ? leaveOverlap(r) : ''}
       ${ok && r.kind === 'ot' ? `<div class="field"><label class="lbl">${L('Jam OT diluluskan', 'Approved OT hours')}</label><input class="input" type="number" step="0.1" min="0" id="apH" value="${r.hours}"></div>` : ''}
       ${ok && r.kind === 'advance' ? `<div class="field"><label class="lbl">${L('Amaun diluluskan (RM)', 'Approved amount (RM)')}</label><input class="input" type="number" step="0.01" min="0" id="apA" value="${r.amount}"></div>
         <p class="xs muted">${L('Akan dipotong dalam gaji bulan berikutnya yang diproses.', 'Will be deducted in the next payroll run.')}</p>` : ''}
@@ -1927,10 +2018,8 @@ function decide(r, ok) {
             let dayRecs = [];
             if (ok && r.kind === 'fix' && r.type === 'out') {
               dayRecs = (await getDocs(query(sub('attendance'), where('workerId', '==', r.workerId), where('date', '==', r.date)))).docs.map(d => ({ id: d.id, ...d.data() }));
-              if (perm() !== 'supervisor') {
-                dayRecs.filter(x => x.auto && ['out', 'break_out'].includes(x.type)).forEach(x => b.delete(doc(db, 'companies', S.cid, 'attendance', x.id)));
-                dayRecs = dayRecs.filter(x => !(x.auto && ['out', 'break_out'].includes(x.type)));
-              }
+              dayRecs.filter(x => x.auto && ['out', 'break_out'].includes(x.type)).forEach(x => b.delete(doc(db, 'companies', S.cid, 'attendance', x.id)));
+              dayRecs = dayRecs.filter(x => !(x.auto && ['out', 'break_out'].includes(x.type)));
             }
             const upd = { status: ok ? 'approved' : 'rejected', decidedAt: serverTimestamp(), decidedBy: S.user.email || '', adminNote: $('#apN', el).value.trim() };
             if (ok && r.kind === 'ot') upd.approvedHours = Number($('#apH', el).value || 0);
@@ -2067,6 +2156,7 @@ async function drawPayrun() {
        <button class="btn btn-sm btn-ghost" id="payXl">${icon('dl', 16)} Excel</button>`
     : `<button class="btn btn-sm btn-ghost" id="payXl">${icon('dl', 16)} Excel</button>
        <button class="btn btn-sm btn-ghost" id="payBank">${icon('dl', 16)} ${L('Fail bank', 'Bank file')}</button>
+       <button class="btn btn-sm btn-soft" id="payStat">${icon('dl', 16)} ${L('Fail caruman', 'Contribution files')}</button>
        <button class="btn btn-sm btn-ghost" id="payPrint">${icon('print', 16)} ${L('Semua slip', 'All slips')}</button>`;
   $('#payOut').innerHTML = `
     <div class="tabs" style="margin-bottom:.8rem">
@@ -2117,6 +2207,7 @@ async function drawPayrun() {
   $('#payBonus') && ($('#payBonus').onclick = () => bonusTool(period, drafts));
   $('#payXl') && ($('#payXl').onclick = () => payExcel(period, list, t));
   $('#payBank') && ($('#payBank').onclick = () => bankFile(period, approved));
+  $('#payStat') && ($('#payStat').onclick = () => statFiles(period, approved));
   $('#payPrint') && ($('#payPrint').onclick = () => openPrint(payslipHtml(S.company, approved, period)) || toast(L('Benarkan pop-up untuk cetak.', 'Allow pop-ups to print.'), 'warn'));
   $('#regen') && ($('#regen').onclick = async (e) => {
     if (!await confirmBox(L('Jana semula semua DRAF (suntingan & bonus dalam draf akan ditulis ganti). Slip yang sudah diluluskan tidak disentuh. Teruskan?', 'Regenerate all DRAFTS (edits & bonuses in drafts will be overwritten). Approved slips are untouched. Continue?'))) return;
@@ -2160,6 +2251,17 @@ function payDetail(period, x) {
         <div class="sec-title">4. ${L('Potongan', 'Deductions')}</div>
         <div class="table-wrap"><table><tbody>${(x.deductions || []).map(e => `<tr><td>${esc(e.name)}${e.note ? `<div class="xs muted">${esc(e.note)}</div>` : ''}</td><td class="right">${money(e.amount)}</td></tr>`).join('') || `<tr><td class="muted">-</td><td></td></tr>`}
           <tr class="bold"><td>${L('Jumlah potongan', 'Total deductions')}</td><td class="right">${money(x.totalDed)}</td></tr></tbody></table></div>
+        ${x.pcbCalc ? `<div class="sec-title">5. ${L('Kiraan PCB automatik (formula LHDN)', 'Automatic PCB calculation (LHDN formula)')}${x.pcbCalc.note ? ` · ${esc(x.pcbCalc.note)}` : ''}</div>
+        <div class="table-wrap"><table><tbody>
+          <tr><td>${L('Kategori', 'Category')}</td><td class="right">${x.pcbCalc.cat || 1}</td></tr>
+          <tr><td>${L('Saraan biasa bulan ini (Y1) / KWSP (K1)', 'Normal pay this month (Y1) / EPF (K1)')}</td><td class="right">${money(x.pcbCalc.y1)} / ${money(x.pcbCalc.k1)}</td></tr>
+          ${x.pcbCalc.yt ? `<tr><td>${L('Saraan tambahan / bonus (Yt) / KWSP (Kt)', 'Additional pay / bonus (Yt) / EPF (Kt)')}</td><td class="right">${money(x.pcbCalc.yt)} / ${money(x.pcbCalc.kt)}</td></tr>` : ''}
+          <tr><td>${L('Terkumpul bulan lepas: saraan / KWSP / PCB', 'Year-to-date: pay / EPF / PCB')}</td><td class="right">${money(x.pcbCalc.ytd?.y || 0)} / ${money(x.pcbCalc.ytd?.k || 0)} / ${money(x.pcbCalc.ytd?.x || 0)}</td></tr>
+          <tr><td>${L('Jumlah pelepasan', 'Total relief')}</td><td class="right">${money(x.pcbCalc.relief || 0)}</td></tr>
+          <tr><td>${L('Anggaran pendapatan bercukai setahun (P)', 'Estimated annual chargeable income (P)')}</td><td class="right">${money(x.pcbCalc.P || 0)}</td></tr>
+          <tr><td>${L('PCB saraan biasa / bonus', 'PCB normal / bonus')}</td><td class="right">${money(x.pcbCalc.normal || 0)} / ${money(x.pcbCalc.bonus || 0)}</td></tr>
+          <tr class="bold"><td>${L('PCB bulan ini', 'PCB this month')}${x.pcbCalc.zakat ? ` (${L('selepas zakat', 'after zakat')} ${money(x.pcbCalc.zakat)})` : ''}</td><td class="right">${money(x.pcbCalc.pcb)}</td></tr>
+        </tbody></table></div>` : ''}
         <div class="card" style="background:var(--gold2);border-color:var(--gold);margin-top:.6rem"><div class="row between"><b>${L('GAJI BERSIH', 'NET PAY')}</b><b style="color:var(--gold);font-size:1.25rem">${money(x.net)}</b></div>
           <div class="xs muted">${money(x.gross)} − ${money(x.totalDed)} · ${L('Kos majikan', 'Employer cost')}: ${money((x.gross || 0) + (x.employerTotal || 0))}</div></div>
       </div>
@@ -2293,13 +2395,15 @@ async function generatePayrun(period, btn) {
     // Kekalkan slip yang sudah diluluskan
     const prev = (await getDoc(doc(db, 'companies', S.cid, 'payruns', period)).catch(() => null))?.data?.();
     const keep = prev ? Object.fromEntries(Object.entries(prev.items || {}).filter(([, x]) => x.status === 'approved' || prev.status === 'locked')) : {};
+    const ytd = await payYtd(period);
     workers.forEach(w => {
       if (keep[w.id]) { items[w.id] = { ...keep[w.id], status: 'approved' }; return; }
       items[w.id] = computeItem({
         c: S.company, w, period, roster,
         recs: recs.filter(r => r.workerId === w.id),
         reqs: reqs.filter(r => r.workerId === w.id),
-        loans: (hrMap[w.id]?.loans || []).map(l => ({ ...l, paid: loanPaid(hrMap[w.id], l.id, period) }))
+        loans: (hrMap[w.id]?.loans || []).map(l => ({ ...l, paid: loanPaid(hrMap[w.id], l.id, period) })),
+        ytd: ytd[w.id]
       });
     });
     await setDoc(doc(db, 'companies', S.cid, 'payruns', period), {
@@ -2309,6 +2413,58 @@ async function generatePayrun(period, btn) {
     toast(L('Draf gaji dijana. Sila semak.', 'Payroll draft generated. Please review.'));
     drawPayrun();
   } catch (e) { console.error(e); toast(authErr(e), 'bad', 5000); busy(btn, false); }
+}
+
+// Profil cukai PCB (kategori, anak, OKU, zakat)
+const PCB_CAT = () => ({ 1: L('1 — Bujang / balu / duda / bercerai', '1 — Single / widowed / divorced'), 2: L('2 — Berkahwin, pasangan TIDAK bekerja', '2 — Married, spouse NOT working'), 3: L('3 — Berkahwin, pasangan bekerja', '3 — Married, spouse working') });
+function pcbProfileText(cfg = {}) {
+  if (cfg.nonRes) return L('Bukan pemastautin (30%)', 'Non-resident (30%)');
+  const k = Number(cfg.kids || 0) + Number(cfg.kidsHigher || 0) + Number(cfg.kidsOku || 0);
+  return `${L('Kategori', 'Category')} ${cfg.cat || 1}${k ? ` · ${k} ${L('anak', 'children')}` : ''}${cfg.zakat ? ` · zakat ${money(cfg.zakat)}` : ''}`;
+}
+function pcbProfileModal(w, cfg, done) {
+  if (!w) return;
+  const m = modal({
+    title: `${L('Profil cukai', 'Tax profile')} · ${esc(w.name)}`,
+    body: `<div class="field"><label class="lbl">${L('Kategori', 'Category')}</label><select class="input" id="pcC">${Object.entries(PCB_CAT()).map(([k, v]) => `<option value="${k}" ${Number(cfg.cat || 1) === Number(k) ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="grid3">
+        <div class="field"><label class="lbl">${L('Anak < 18 / sekolah', 'Children < 18 / school')}</label><input class="input" type="number" min="0" max="20" id="pcK" value="${cfg.kids || 0}"></div>
+        <div class="field"><label class="lbl">${L('Anak 18+ di IPT (diploma ke atas)', 'Children 18+ in higher education')}</label><input class="input" type="number" min="0" max="20" id="pcKh" value="${cfg.kidsHigher || 0}"></div>
+        <div class="field"><label class="lbl">${L('Anak OKU', 'Disabled children')}</label><input class="input" type="number" min="0" max="20" id="pcKo" value="${cfg.kidsOku || 0}"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="pcO" ${cfg.oku ? 'checked' : ''}>${L('Pekerja OKU', 'Staff is disabled (OKU)')}</label>
+      <label class="check"><input type="checkbox" id="pcSo" ${cfg.spouseOku ? 'checked' : ''}>${L('Pasangan OKU (kategori 2)', 'Disabled spouse (category 2)')}</label>
+      <div class="grid2" style="margin-top:.5rem">
+        <div class="field"><label class="lbl">${L('Zakat potongan gaji sebulan (RM)', 'Monthly zakat via salary (RM)')}</label><input class="input" type="number" min="0" step="0.01" id="pcZ" value="${cfg.zakat || ''}"></div>
+        <div class="field"><label class="lbl">${L('Taraf', 'Residency')}</label><select class="input" id="pcR"><option value="">${L('Pemastautin', 'Resident')}</option><option value="1" ${cfg.nonRes ? 'selected' : ''}>${L('Bukan pemastautin (< 182 hari)', 'Non-resident (< 182 days)')}</option></select></div>
+      </div>
+      <p class="xs muted">${L('Ikut borang TP1 / TP3 pekerja. Simpan, kemudian tekan Simpan PCB.', 'Based on the staff TP1 / TP3 forms. Save, then tap Save PCB.')}</p>`,
+    actions: [{ label: L('Batal', 'Cancel') }, { label: L('OK', 'OK'), cls: 'btn-primary', onClick: ({ el }) => {
+      Object.assign(cfg, { mode: 'auto', cat: Number($('#pcC', el).value), kids: Number($('#pcK', el).value || 0), kidsHigher: Number($('#pcKh', el).value || 0), kidsOku: Number($('#pcKo', el).value || 0),
+        oku: $('#pcO', el).checked, spouseOku: $('#pcSo', el).checked, zakat: Number($('#pcZ', el).value || 0), nonRes: !!$('#pcR', el).value });
+      done && done();
+    } }]
+  });
+  return m;
+}
+
+// Jumlah terkumpul tahun semasa (bulan sebelum) daripada slip yang diluluskan — untuk PCB berkomputer
+async function payYtd(period) {
+  const y = period.slice(0, 4), out = {};
+  const s = await getDocs(query(sub('payruns'), where('period', '>=', `${y}-01`), where('period', '<', period))).catch(() => null);
+  (s ? s.docs : []).forEach(d => {
+    const run = d.data();
+    Object.values(run.items || {}).forEach(x => {
+      if (!(x.status === 'approved' || run.status === 'locked')) return;
+      const o = out[x.workerId] = out[x.workerId] || { y: 0, k: 0, x: 0, z: 0 };
+      const ded = (k) => (x.deductions || []).filter(q => q.kind === k).reduce((a, q) => a + Number(q.amount || 0), 0);
+      o.y = r2(o.y + Number(x.gross || 0) - ded('unpaid') - ded('late'));
+      o.k = r2(o.k + ded('epf'));
+      o.x = r2(o.x + ded('pcb'));
+      o.z = r2(o.z + Number(x.pcbCalc?.zakat || 0));
+    });
+  });
+  return out;
 }
 
 function payLineRow(x, kind) {
@@ -2422,6 +2578,88 @@ function bankFile(period, items) {
   if (missing) toast(L(`${missing} pekerja tiada no. akaun bank.`, `${missing} staff have no bank account number.`), 'warn', 5000);
 }
 
+// ---------- Fail caruman untuk dimuat naik ke portal (PERKESO ASSIST, LHDN e-Data PCB) & Borang A KWSP ----------
+const dlText = (name, text) => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+const fxL = (v, n) => String(v ?? '').replace(/[\r\n]/g, ' ').slice(0, n).padEnd(n, ' ');
+const fxN = (v, n) => String(Math.max(0, Math.round(Number(v || 0)))).slice(-n).padStart(n, '0');
+const cents = (v) => Math.round(Number(v || 0) * 100);
+const digits = (v) => String(v || '').replace(/\D/g, '');
+const dk2 = (x, k) => (x.deductions || []).filter(d => d.kind === k).reduce((a, d) => a + Number(d.amount || 0), 0);
+
+function statFiles(period, items) {
+  const c = S.company, [yy, mm] = period.split('-');
+  const wk = (id) => S.workers.find(w => w.id === id) || {};
+  const miss = [];
+  if (!c.socsoEmp) miss.push(L('Kod majikan PERKESO', 'SOCSO employer code'));
+  if (!c.taxEmp) miss.push(L('No. E majikan (LHDN)', 'Employer E number (LHDN)'));
+  if (!c.epfEmp) miss.push(L('No. majikan KWSP', 'EPF employer number'));
+  const m = modal({
+    title: `${L('Fail caruman', 'Contribution files')} · ${esc(periodLabel(period))}`, wide: true,
+    body: `<p class="small muted" style="margin-top:0">${L(`Dijana daripada ${items.length} slip yang diluluskan. Muat naik ke portal masing-masing; portal akan menyemak fail sebelum diterima.`, `Generated from ${items.length} approved slips. Upload to each portal; the portal checks the file before accepting it.`)}</p>
+      ${miss.length ? `<div class="card" style="border-color:var(--warn)"><b>⚠️ ${L('Lengkapkan dahulu di Tetapan → Profil Syarikat:', 'Complete first in Settings → Company Profile:')}</b> ${miss.map(esc).join(', ')}</div>` : ''}
+      <div class="set-row"><div><b>PERKESO + SIP (ASSIST 2.0)</b><div class="xs muted">${L('Fail teks gabungan PERKESO + SIP + SKBBK, format rasmi PERKESO 2026 (278 aksara sebaris). Portal ASSIST → Contribution → SOCSO + EIS → Text File.', 'Combined SOCSO + EIS + SKBBK text file, official PERKESO 2026 format (278 characters per line). ASSIST portal → Contribution → SOCSO + EIS → Text File.')}</div></div>
+        <button class="btn btn-sm btn-primary" id="sfSocso">${icon('dl', 16)} .txt</button></div>
+      <div class="set-row"><div><b>LHDN CP39 (e-Data PCB)</b><div class="xs muted">${L('Fail teks PCB bulanan (Header + Detail). e-Data PCB → Muat naik / Semak Fail Teks. Hanya pekerja yang ada PCB / CP38.', 'Monthly PCB text file (Header + Detail). e-Data PCB → Upload / Check Text File. Only staff with PCB / CP38.')}</div></div>
+        <button class="btn btn-sm btn-primary" id="sfPcb">${icon('dl', 16)} .txt</button></div>
+      <div class="set-row"><div><b>KWSP Borang A</b><div class="xs muted">${L('Senarai caruman (No. ahli, IC, nama, upah, syer majikan & pekerja) dalam Excel — untuk semakan / isi di i-Akaun Majikan, dan boleh dicetak.', 'Contribution list (member no., IC, name, wages, employer & employee share) in Excel — for checking / entering in i-Akaun Employer, and printable.')}</div></div>
+        <button class="btn btn-sm btn-primary" id="sfEpf">${icon('dl', 16)} Excel</button></div>`,
+    actions: [{ label: L('Tutup', 'Close') }]
+  });
+  const el = m.el;
+  $('#sfSocso', el).onclick = () => {
+    const rows = items.filter(x => dk2(x, 'socso') + dk2(x, 'eis') + (x.employer?.socso || 0) + (x.employer?.eis || 0) > 0);
+    const lines = rows.map(x => {
+      const w = wk(x.workerId), foreign = (w.nationality || 'citizen') === 'foreign';
+      const id = foreign ? (w.socsoNo || x.socsoNo || w.passport || '') : digits(x.ic || w.ic);
+      return fxL(c.socsoEmp || '', 12) + fxL(digits(c.ssm), 20) + fxL(String(id).toUpperCase(), 12) + fxL(String(x.name || '').toUpperCase(), 150)
+        + mm + yy + fxN(cents(x.bases?.socso ?? x.gross), 14)
+        + fxN(cents(x.employer?.socso), 6) + fxN(cents(dk2(x, 'socso')), 6) + fxN(cents(x.employer?.eis), 6) + fxN(cents(dk2(x, 'eis')), 6)
+        + fxN(cents(dk2(x, 'skbbk')), 6) + ' '.repeat(14) + ' '.repeat(20);
+    });
+    if (!lines.length) return toast(L('Tiada caruman PERKESO bulan ini.', 'No SOCSO contributions this month.'), 'warn');
+    dlText(`PERKESO_${c.code || ''}_${mm}${yy}.txt`, lines.join('\r\n') + '\r\n');
+    logAct('payroll.file', `perkeso ${period}`);
+  };
+  $('#sfPcb', el).onclick = () => {
+    const rows = items.filter(x => dk2(x, 'pcb') > 0 || dk2(x, 'cp38') > 0);
+    if (!rows.length) return toast(L('Tiada PCB bulan ini.', 'No PCB this month.'), 'warn');
+    const eNo = digits(c.taxEmp), hq = digits(c.taxEmpHq || c.taxEmp);
+    const totP = rows.reduce((a, x) => a + cents(dk2(x, 'pcb')), 0), totC = rows.reduce((a, x) => a + cents(dk2(x, 'cp38')), 0);
+    const nP = rows.filter(x => dk2(x, 'pcb') > 0).length, nC = rows.filter(x => dk2(x, 'cp38') > 0).length;
+    const head = 'H' + fxN(hq, 10) + fxN(eNo, 10) + yy + mm + fxN(totP, 10) + fxN(nP, 5) + fxN(totC, 10) + fxN(nC, 5);
+    const det = rows.map(x => {
+      const w = wk(x.workerId), foreign = (w.nationality || 'citizen') === 'foreign';
+      return 'D' + fxN(digits(x.taxNo || w.taxNo).slice(0, 10), 10) + '0' + fxL(String(x.name || '').toUpperCase(), 60) + ' '.repeat(12)
+        + fxL(foreign ? '' : digits(x.ic || w.ic), 12) + fxL(foreign ? String(w.passport || x.ic || '').toUpperCase() : '', 12)
+        + fxL(foreign ? String(w.countryCode || '').toUpperCase() : 'MY', 2) + fxN(cents(dk2(x, 'pcb')), 8) + fxN(cents(dk2(x, 'cp38')), 8) + fxL(x.workerId, 10);
+    });
+    const noTax = rows.filter(x => !digits(x.taxNo || wk(x.workerId).taxNo)).length;
+    dlText(`${fxN(eNo, 10)}${mm}_${yy}.txt`, [head, ...det].join('\r\n') + '\r\n');
+    logAct('payroll.file', `cp39 ${period}`);
+    if (noTax) toast(L(`${noTax} pekerja tiada no. cukai — lengkapkan dalam profil pekerja.`, `${noTax} staff have no tax number — complete it in the staff profile.`), 'warn', 6000);
+  };
+  $('#sfEpf', el).onclick = () => {
+    const rows = items.filter(x => dk2(x, 'epf') + (x.employer?.epf || 0) > 0);
+    if (!rows.length) return toast(L('Tiada caruman KWSP bulan ini.', 'No EPF contributions this month.'), 'warn');
+    const data = rows.map((x, i) => [i + 1, x.epfNo || wk(x.workerId).epfNo || '', x.ic || '', String(x.name || '').toUpperCase(), r2(x.bases?.epf ?? x.gross), r2(x.employer?.epf || 0), r2(dk2(x, 'epf')), r2((x.employer?.epf || 0) + dk2(x, 'epf'))]);
+    const sum = (k) => r2(data.reduce((a, r) => a + Number(r[k] || 0), 0));
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`BORANG A KWSP — ${c.name || ''}`], [`No. Majikan: ${c.epfEmp || '-'}`, '', '', `Bulan caruman: ${mm}/${yy}`], [],
+      ['Bil', 'No. Ahli KWSP', 'No. Kad Pengenalan', 'Nama Pekerja', 'Upah (RM)', 'Caruman Majikan (RM)', 'Caruman Pekerja (RM)', 'Jumlah (RM)'],
+      ...data, [], ['', '', '', 'JUMLAH', sum(4), sum(5), sum(6), sum(7)]]);
+    ws['!cols'] = [{ wch: 5 }, { wch: 14 }, { wch: 16 }, { wch: 34 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Borang A');
+    XLSX.writeFile(wb, `KWSP_BorangA_${c.code || ''}_${period}.xlsx`);
+    logAct('payroll.file', `kwsp ${period}`);
+    const noNo = rows.filter(x => !(x.epfNo || wk(x.workerId).epfNo)).length;
+    if (noNo) toast(L(`${noNo} pekerja tiada no. ahli KWSP.`, `${noNo} staff have no EPF member number.`), 'warn', 6000);
+  };
+}
+
 function drawPaySettings() {
   const P = payrollSettings(S.company), c = S.company;
   const num = (id, v, step = '0.01') => `<input class="input" type="number" step="${step}" min="0" id="${id}" value="${v}">`;
@@ -2518,17 +2756,38 @@ function drawPaySettings() {
 
   <div class="card">
     <h3>${L('PCB / Cukai Bulanan Pekerja', 'Monthly PCB / Tax per Staff')}</h3>
-    <p class="small muted">${L('Isi amaun PCB bulanan setiap pekerja (ikut kalkulator LHDN). Kosong = tiada PCB. Dipotong automatik setiap kali gaji diproses.', 'Enter each staff member\'s monthly PCB (from the LHDN calculator). Blank = no PCB. Deducted automatically every payroll run.')}</p>
-    <div class="table-wrap"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th>${L('Gaji asas', 'Basic pay')}</th><th>PCB (RM)</th></tr></thead><tbody>
-      ${S.workers.filter(w => w.active !== false).map(w => `<tr><td><b>${esc(w.name)}</b><div class="xs muted mono">${esc(w.id)}</div></td><td>${w.payType === 'monthly' || !w.payType ? money(w.salary || 0) : esc(w.payType)}</td>
-        <td><input class="input" type="number" step="0.01" min="0" data-pcb="${esc(w.id)}" value="${(c.pcbMap || {})[w.id] ?? ''}" style="max-width:130px"></td></tr>`).join('')}</tbody></table></div>
-    <button class="btn btn-primary btn-sm" id="pcbSave">${L('Simpan PCB', 'Save PCB')}</button>
+    <p class="small muted">${L('<b>Auto</b>: PCB dikira setiap bulan ikut formula berkomputer LHDN (gaji, KWSP, bonus, kategori, anak & jumlah terkumpul tahun ini). Tekan <b>Profil cukai</b> untuk isi kategori & anak (ikut borang TP1 / maklumat pekerja). <b>Manual</b>: isi amaun tetap (cth. dari Kalkulator PCB LHDN). Kosong = tiada PCB.', '<b>Auto</b>: PCB is calculated monthly using the LHDN computerised formula (pay, EPF, bonus, category, children & year-to-date totals). Tap <b>Tax profile</b> to set category & children (from TP1 / staff details). <b>Manual</b>: a fixed amount (e.g. from the LHDN PCB Calculator). Blank = no PCB.')}</p>
+    <div class="table-wrap"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th>${L('Gaji asas', 'Basic pay')}</th><th>${L('Kaedah', 'Method')}</th><th>${L('PCB manual (RM)', 'Manual PCB (RM)')}</th><th></th></tr></thead><tbody>
+      ${S.workers.filter(w => w.active !== false).map(w => {
+        const cfg = (c.pcbMap || {})[w.id], auto = cfg && typeof cfg === 'object' && cfg.mode === 'auto';
+        const amt = cfg && typeof cfg === 'object' ? (cfg.amount ?? '') : (cfg ?? '');
+        return `<tr data-pcbrow="${esc(w.id)}"><td><b>${esc(w.name)}</b><div class="xs muted mono">${esc(w.id)}</div></td><td>${w.payType === 'monthly' || !w.payType ? money(w.salary || 0) : esc(w.payType)}</td>
+        <td><select class="input" data-pcbm style="max-width:130px"><option value="manual" ${auto ? '' : 'selected'}>${L('Manual', 'Manual')}</option><option value="auto" ${auto ? 'selected' : ''}>Auto (LHDN)</option></select></td>
+        <td><input class="input" type="number" step="0.01" min="0" data-pcb value="${esc(String(amt))}" style="max-width:120px" ${auto ? 'disabled' : ''}></td>
+        <td><button type="button" class="btn btn-sm btn-soft" data-pcbp>${L('Profil cukai', 'Tax profile')}</button><div class="xs muted" data-pcbsum>${auto ? esc(pcbProfileText(cfg)) : ''}</div></td></tr>`;
+      }).join('')}</tbody></table></div>
+    <div class="row"><button class="btn btn-primary btn-sm" id="pcbSave">${L('Simpan PCB', 'Save PCB')}</button>
+      <button class="btn btn-ghost btn-sm" id="pcbAllAuto">${L('Tukar semua ke Auto', 'Switch all to Auto')}</button></div>
+    <p class="xs muted" style="margin-top:.5rem">${L('Nota: PCB Auto ialah kiraan anggaran ikut formula LHDN (pelepasan wajib, KWSP had RM4,000, rebat RM400, zakat). Pelepasan lain (insurans, perubatan dll.) tidak diambil kira — sama seperti Jadual PCB. 2027 guna kadar cadangan Bajet 2027. Semak dengan Kalkulator PCB LHDN jika ragu.', 'Note: Auto PCB is an estimate using the LHDN formula (mandatory reliefs, EPF cap RM4,000, RM400 rebate, zakat). Other reliefs (insurance, medical etc.) are not included — same as the PCB Schedule. 2027 uses the proposed Budget 2027 rates. Check with the LHDN PCB Calculator if unsure.')}</p>
   </div>
 `;
+  const pcbCfg = {};
+  S.workers.forEach(w => { const v = (c.pcbMap || {})[w.id]; pcbCfg[w.id] = v && typeof v === 'object' ? { ...v } : { mode: 'manual', amount: v ?? '' }; });
+  $$('[data-pcbrow]').forEach(r => {
+    const id = r.dataset.pcbrow;
+    $('[data-pcbm]', r).onchange = (e) => { pcbCfg[id].mode = e.target.value; $('[data-pcb]', r).disabled = e.target.value === 'auto'; $('[data-pcbsum]', r).textContent = e.target.value === 'auto' ? pcbProfileText(pcbCfg[id]) : ''; };
+    $('[data-pcbp]', r).onclick = () => pcbProfileModal(S.workers.find(w => w.id === id), pcbCfg[id], () => { $('[data-pcbm]', r).value = 'auto'; $('[data-pcbm]', r).onchange({ target: $('[data-pcbm]', r) }); });
+  });
+  $('#pcbAllAuto').onclick = () => $$('[data-pcbm]').forEach(x => { x.value = 'auto'; x.onchange({ target: x }); });
   $('#pcbSave').onclick = async (e) => {
-    const map = {}; $$('[data-pcb]').forEach(i => { if (Number(i.value) > 0) map[i.dataset.pcb] = Number(i.value); });
+    const map = {};
+    $$('[data-pcbrow]').forEach(r => {
+      const id = r.dataset.pcbrow, cfg = pcbCfg[id], amt = Number($('[data-pcb]', r).value || 0);
+      if (cfg.mode === 'auto') map[id] = { ...cfg, mode: 'auto', amount: amt || 0 };
+      else if (amt > 0) map[id] = amt;
+    });
     busy(e.currentTarget, true);
-    try { await updateDoc(cRef(), { pcbMap: map }); S.company.pcbMap = map; logAct('finance.pcb'); toast(L('PCB disimpan.', 'PCB saved.')); }
+    try { await updateDoc(cRef(), { pcbMap: map }); S.company.pcbMap = map; logAct('finance.pcb'); toast(L('PCB disimpan. Jana semula draf gaji untuk guna tetapan baharu.', 'PCB saved. Regenerate payroll drafts to apply the new settings.')); }
     catch (err) { toast(authErr(err), 'bad'); } finally { busy(e.currentTarget, false); }
   };
   // Senarai elaun = templat syarikat + semua elaun dalam profil pekerja

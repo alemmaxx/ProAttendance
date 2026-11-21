@@ -3,6 +3,7 @@
 import { epf as epfT, socso as socsoT, eis as eisT, ageAt } from './statutory.js';
 import { L, esc, todayStr, toDate, summarizeDay, money, fmtDate } from './ui.js';
 import { resolveDay, lateSettings, leaveTypes, otKind, otRates, dateRange, OT_LABEL } from './sched.js';
+import { calcPcb, isAutoPcb, manualPcb } from './pcb.js';
 
 export const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -39,7 +40,7 @@ export function rates(w, P) {
 
 // Kira slip gaji draf seorang pekerja untuk satu bulan
 // recs: rekod kehadiran pekerja dalam bulan itu; roster: peta jadual; reqs: permohonan diluluskan pekerja ini
-export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans = [] }) {
+export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans = [], ytd = null }) {
   const P = payrollSettings(c);
   const { from, to } = periodRange(period);
   const today = todayStr();
@@ -157,7 +158,8 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
     thNo: w.thNo || '', asbNo: w.asbNo || '',
     payType: w.payType || 'monthly', rate: R.rate, dailyRate: R.daily, hourlyRate: R.hourly,
     days: { present: presentN, leavePaid, leaveUnpaid, absent, lateMin, lateDays, workHours: r2(workMin / 60), ot: otH },
-    earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, period, claimIds, advanceIds, loanPays, branchId: w.branchId || ''
+    earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, period, claimIds, advanceIds, loanPays, branchId: w.branchId || '',
+    ytd: ytd || { y: 0, k: 0, x: 0, z: 0 }
   };
   applyStatutory(item, P, w);
   return totals(item);
@@ -166,7 +168,8 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
 // Kira caruman berkanun (ganti baris sedia ada)
 export function applyStatutory(item, P, w = {}) {
   // Caruman ikut kadar dalam Tetapan Kewangan; PCB ikut senarai PCB finance
-  const st = {}, pcb = Number(P.pcbMap?.[w.id] || 0);
+  const st = {}, pcbCfg = P.pcbMap?.[w.id];
+  let pcb = isAutoPcb(pcbCfg) ? 0 : manualPcb(pcbCfg);
   const red = item.deductions.filter(d => d.kind === 'unpaid' || d.kind === 'late').reduce((a, d) => a + Number(d.amount || 0), 0);
   const epfBase = Math.max(0, item.earnings.filter(e => e.epf).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
   const socsoBase = Math.max(0, item.earnings.filter(e => e.socso).reduce((a, e) => a + Number(e.amount || 0), 0) - red);
@@ -186,19 +189,33 @@ export function applyStatutory(item, P, w = {}) {
     ee = { epf: pick(st.epfEe, epfBase, P.epfEe), socso: pick(st.socsoEe, socsoBase, P.socsoEe), eis: pick(st.eisEe, socsoBase, P.eisEe), pcb: r2(pcb) };
     item.employer = { epf: pick(st.epfEr, epfBase, P.epfEr), socso: pick(st.socsoEr, socsoBase, P.socsoEr), eis: pick(st.eisEr, socsoBase, P.eisEr) };
   }
+  // PCB automatik (formula berkomputer LHDN) — guna KWSP pekerja yang baru dikira
+  item.pcbCalc = null;
+  if (isAutoPcb(pcbCfg)) {
+    const per = item.period || new Date().toISOString().slice(0, 7);
+    const isBonus = (e) => e.kind === 'bonus';
+    const yAll = item.earnings.reduce((a, e) => a + Number(e.amount || 0), 0) - red;
+    const yt = item.earnings.filter(isBonus).reduce((a, e) => a + Number(e.amount || 0), 0);
+    const ktBase = item.earnings.filter(e => isBonus(e) && e.epf).reduce((a, e) => a + Number(e.amount || 0), 0);
+    const kt = epfBase > 0 ? r2(ee.epf * ktBase / epfBase) : 0;
+    const c = calcPcb({ year: Number(per.slice(0, 4)), month: Number(per.slice(5, 7)), cfg: pcbCfg, y1: Math.max(0, yAll - yt), k1: Math.max(0, ee.epf - kt), yt, kt, ytd: item.ytd });
+    ee.pcb = c.pcb;
+    item.pcbCalc = { ...c, y1: r2(Math.max(0, yAll - yt)), yt: r2(yt), k1: r2(Math.max(0, ee.epf - kt)), kt, ytd: item.ytd || {}, zakat: r2(pcbCfg.zakat || 0), cat: Number(pcbCfg.cat || 1) };
+  }
   // Levi HRD Corp (majikan): % daripada gaji asas + elaun tetap bulanan
   if (Number(P.hrdRate) > 0) {
     const hrdBase = (item.earnings || []).filter(e => e.kind === 'basic' || (e.kind === 'allow' && !e.once)).reduce((a, e) => a + Number(e.amount || 0), 0);
     item.employer.levy = r2(hrdBase * Number(P.hrdRate) / 100);
   }
   item.base = { epf: r2(epfBase), socso: r2(socsoBase) };
-  item.deductions = item.deductions.filter(d => !['epf', 'socso', 'eis', 'skbbk', 'pcb'].includes(d.kind));
+  item.deductions = item.deductions.filter(d => !['epf', 'socso', 'eis', 'skbbk', 'pcb', 'zakat'].includes(d.kind));
   const stat = [
     { kind: 'epf', name: L('KWSP (pekerja)', 'EPF (employee)'), amount: ee.epf },
     { kind: 'socso', name: L('PERKESO (pekerja)', 'SOCSO (employee)'), amount: ee.socso },
     { kind: 'eis', name: L('SIP (pekerja)', 'EIS (employee)'), amount: ee.eis },
     { kind: 'skbbk', name: L('PERKESO Lindung 24 Jam (SKBBK)', 'SOCSO Lindung 24 Jam (SKBBK)'), amount: skbbk },
-    { kind: 'pcb', name: L('PCB / Cukai', 'PCB / Tax'), amount: ee.pcb }
+    { kind: 'pcb', name: L('PCB / Cukai', 'PCB / Tax'), amount: ee.pcb },
+    { kind: 'zakat', name: L('Zakat', 'Zakat'), amount: item.pcbCalc?.zakat || 0 }
   ].filter(x => x.amount > 0);
   item.deductions = [...stat, ...item.deductions];
   return item;

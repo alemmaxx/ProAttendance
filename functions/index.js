@@ -400,6 +400,17 @@ exports.pa_passkeyRemove = onCall({ region: REGION }, async (req) => {
 
 // ================================================================ PERINGATAN LANGGANAN HAMPIR TAMAT
 // Setiap pagi 9:00 (waktu Malaysia): notifikasi kepada pemilik / pengurus 7, 3 & 1 hari sebelum tamat, dan pada hari tamat.
+// Bersihkan peti notifikasi (> 90 hari) setiap hari
+exports.pa_inboxCleanup = onSchedule({ schedule: 'every day 03:30', timeZone: 'Asia/Kuala_Lumpur', region: REGION }, async () => {
+  const cut = Timestamp.fromMillis(Date.now() - 90 * 86400000);
+  for (let round = 0; round < 20; round++) {
+    const s = await db.collectionGroup('inbox').where('at', '<', cut).limit(400).get();
+    if (s.empty) break;
+    const b = db.batch(); s.docs.forEach(d => b.delete(d.ref)); await b.commit();
+    if (s.size < 400) break;
+  }
+});
+
 exports.pa_expiryReminder = onSchedule({ schedule: 'every day 09:00', timeZone: 'Asia/Kuala_Lumpur', region: REGION }, async () => {
   const now = Date.now(), DAY = 86400000;
   const s = await db.collection('companies').where('expiry', '<=', Timestamp.fromMillis(now + 8 * DAY)).where('expiry', '>=', Timestamp.fromMillis(now - DAY)).get();
