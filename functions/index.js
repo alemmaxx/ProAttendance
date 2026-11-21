@@ -213,7 +213,9 @@ exports.pa_redeemPromo = onCall({ region: REGION }, async (req) => {
 const KIND = { leave: 'Cuti', ot: 'OT', fix: 'Pembetulan punch', claim: 'Tuntutan', advance: 'Pendahuluan gaji', swap: 'Tukar syif' };
 const TRIG = (document) => ({ document, database: 'proattendance', region: REGION });
 
-async function sendTo(cid, filter, title, body, link) {
+// to: uid pekerja, 'workers' (semua pekerja) atau 'admins' — disimpan dalam peti notifikasi app (loceng)
+async function sendTo(cid, filter, title, body, link, to) {
+  if (to) await db.collection(`companies/${cid}/inbox`).add({ to, title, body: String(body || '').slice(0, 300), link: link || '', at: FieldValue.serverTimestamp() }).catch(e => console.warn('inbox', e.message));
   const s = await db.collection(`companies/${cid}/tokens`).get();
   const list = s.docs.map(d => ({ id: d.id, ...d.data() })).filter(filter).filter(t => t.token);
   if (!list.length) return;
@@ -228,7 +230,7 @@ async function sendTo(cid, filter, title, body, link) {
 
 exports.pa_onRequestCreated = onDocumentCreated(TRIG('companies/{cid}/requests/{rid}'), async (e) => {
   const r = e.data?.data(); if (!r) return;
-  await sendTo(e.params.cid, t => t.role === 'admin', 'Permohonan baharu', `${r.name}: ${KIND[r.kind] || r.kind}`, '/admin.html');
+  await sendTo(e.params.cid, t => t.role === 'admin', 'Permohonan baharu', `${r.name}: ${KIND[r.kind] || r.kind}`, '/admin.html', 'admins');
 });
 
 exports.pa_onRequestUpdated = onDocumentUpdated(TRIG('companies/{cid}/requests/{rid}'), async (e) => {
@@ -236,7 +238,7 @@ exports.pa_onRequestUpdated = onDocumentUpdated(TRIG('companies/{cid}/requests/{
   if (!a || !b || a.status === b.status || !['approved', 'rejected'].includes(a.status)) return;
   await sendTo(e.params.cid, t => t.id === a.uid,
     a.status === 'approved' ? 'Permohonan diluluskan ✓' : 'Permohonan ditolak',
-    `${KIND[a.kind] || a.kind}${a.adminNote ? ' — ' + a.adminNote : ''}`, '/worker');
+    `${KIND[a.kind] || a.kind}${a.adminNote ? ' — ' + a.adminNote : ''}`, '/worker', a.uid);
 });
 
 // Borang tuntutan bulanan: hantar → semak penyelia → lulus finance/boss → dibayar
@@ -246,33 +248,33 @@ exports.pa_onClaim = onDocumentWritten(TRIG('companies/{cid}/claims/{id}'), asyn
   const cid = e.params.cid, mo = a.month || '', who = `${a.name || ''} (${a.workerId || ''})`;
   const full = t => t.role === 'admin' && t.perm !== 'supervisor';
   if (a.status === 'submitted') {
-    await sendTo(cid, t => t.role === 'admin', 'Tuntutan baharu untuk disemak', `${who} · ${mo}`, '/admin.html');
+    await sendTo(cid, t => t.role === 'admin', 'Tuntutan baharu untuk disemak', `${who} · ${mo}`, '/admin.html', 'admins');
   } else if (a.status === 'checked') {
-    await sendTo(cid, full, 'Tuntutan menunggu kelulusan', `${who} · ${mo} · disemak oleh ${a.checkedBy || 'penyelia'}`, '/admin.html');
-    await sendTo(cid, t => t.id === a.uid, 'Tuntutan disemak ✓', `Tuntutan ${mo} sudah disemak penyelia dan dihantar ke finance.`, '/worker');
+    await sendTo(cid, full, 'Tuntutan menunggu kelulusan', `${who} · ${mo} · disemak oleh ${a.checkedBy || 'penyelia'}`, '/admin.html', 'admins');
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan disemak ✓', `Tuntutan ${mo} sudah disemak penyelia dan dihantar ke finance.`, '/worker', a.uid);
   } else if (a.status === 'approved') {
-    await sendTo(cid, t => t.id === a.uid, 'Tuntutan diluluskan ✓', `Tuntutan ${mo} diluluskan${a.approvedBy ? ' oleh ' + a.approvedBy : ''}.`, '/worker');
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan diluluskan ✓', `Tuntutan ${mo} diluluskan${a.approvedBy ? ' oleh ' + a.approvedBy : ''}.`, '/worker', a.uid);
   } else if (a.status === 'rejected') {
-    await sendTo(cid, t => t.id === a.uid, 'Tuntutan ditolak', `Tuntutan ${mo}${a.adminNote ? ' — ' + a.adminNote : ''}. Sila betulkan & hantar semula.`, '/worker');
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan ditolak', `Tuntutan ${mo}${a.adminNote ? ' — ' + a.adminNote : ''}. Sila betulkan & hantar semula.`, '/worker', a.uid);
   } else if (a.status === 'paid') {
-    await sendTo(cid, t => t.id === a.uid, 'Tuntutan dibayar 💰', `Tuntutan ${mo} sudah dibayar${a.paidRef ? ' (' + a.paidRef + ')' : ''}.`, '/worker');
+    await sendTo(cid, t => t.id === a.uid, 'Tuntutan dibayar 💰', `Tuntutan ${mo} sudah dibayar${a.paidRef ? ' (' + a.paidRef + ')' : ''}.`, '/worker', a.uid);
   }
 });
 
 // Slip gaji diterbitkan
 exports.pa_onPayslip = onDocumentCreated(TRIG('companies/{cid}/payslips/{id}'), async (e) => {
   const x = e.data?.data(); if (!x || !x.uid) return;
-  await sendTo(e.params.cid, t => t.id === x.uid, 'Slip gaji baharu', `Slip gaji ${x.period || ''} sudah tersedia.`, '/worker');
+  await sendTo(e.params.cid, t => t.id === x.uid, 'Slip gaji baharu', `Slip gaji ${x.period || ''} sudah tersedia.`, '/worker', x.uid);
 });
 
 exports.pa_onAnnouncement = onDocumentCreated(TRIG('companies/{cid}/announcements/{aid}'), async (e) => {
   const a = e.data?.data(); if (!a) return;
-  await sendTo(e.params.cid, t => t.role === 'worker', a.title || 'Pengumuman', String(a.body || '').slice(0, 140), '/worker');
+  await sendTo(e.params.cid, t => t.role === 'worker', a.title || 'Pengumuman', String(a.body || '').slice(0, 140), '/worker', 'workers');
 });
 
 exports.pa_onTask = onDocumentCreated(TRIG('companies/{cid}/tasks/{tid}'), async (e) => {
   const x = e.data?.data(); if (!x) return;
-  await sendTo(e.params.cid, t => t.id === x.uid, 'Tugasan baharu', x.title || '', '/worker');
+  await sendTo(e.params.cid, t => t.id === x.uid, 'Tugasan baharu', x.title || '', '/worker', x.uid);
 });
 
 
@@ -411,7 +413,7 @@ exports.pa_expiryReminder = onSchedule({ schedule: 'every day 09:00', timeZone: 
     const body = left > 0
       ? `${what} ${c.name || ''} tamat dalam ${left} hari. Bayar sekarang supaya pekerja boleh terus punch.`
       : `${what} ${c.name || ''} tamat hari ini. Pekerja tidak boleh punch selepas tamat — sila bayar.`;
-    await sendTo(d.id, full, left > 0 ? `⏰ ${left} hari lagi` : '⚠️ Langganan tamat hari ini', body, '/');
+    await sendTo(d.id, full, left > 0 ? `⏰ ${left} hari lagi` : '⚠️ Langganan tamat hari ini', body, '/', 'admins');
   }));
 });
 
@@ -473,7 +475,7 @@ exports.pa_attendanceWatch = onSchedule({ schedule: 'every 15 minutes', timeZone
         if (last.type === 'break_in') b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'break_out', date, ts: Timestamp.fromMillis(Math.max(last._t, endMs - 60000)), method: 'auto', auto: true, lat: null, lng: null, deviceId: null, dept: w.dept || '' });
         b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'out', date, ts: Timestamp.fromMillis(Math.max(last._t + 60000, endMs)), method: 'auto', auto: true, lat: null, lng: null, acc: null, deviceId: null, dept: w.dept || '', lid: null, locName: '', hasSelfie: false });
         await b.commit();
-        await sendTo(cid, t => t.id === last.uid, 'Tamat kerja automatik', `Anda dikeluarkan automatik pada ${hmOf(Math.max(last._t + 60000, endMs))} kerana terlupa tekan Tamat Kerja. Mohon Pembetulan Punch dengan masa sebenar anda balik — OT dikira automatik bila diluluskan.`, '/worker');
+        await sendTo(cid, t => t.id === last.uid, 'Tamat kerja automatik', `Anda dikeluarkan automatik pada ${hmOf(Math.max(last._t + 60000, endMs))} kerana terlupa tekan Tamat Kerja. Mohon Pembetulan Punch dengan masa sebenar anda balik — OT dikira automatik bila diluluskan.`, '/worker', last.uid);
         continue;
       }
       // Peringatan jejak lokasi (hanya dalam waktu kerja, bukan semasa rehat)

@@ -2,6 +2,7 @@
 import { auth, db, call, workerEmail, FIREBASE_CONFIG } from './fb.js';
 import { APP_VERSION } from './config.js';
 import { manualModal, manualFirstTime, ADMIN_TOPIC } from './manual.js';
+import { bellHtml, startInbox, bindBell } from './inbox.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut,
@@ -337,6 +338,7 @@ function renderShell() {
         <h1 id="vTitle"></h1>
         <span id="subBadge"></span>
         <span class="ver">v${APP_VERSION}</span>
+        ${bellHtml('icon-btn')}
       </header>
       <div class="content"><div class="pghero no-print"><div class="tag" id="vTag"></div><h2 class="gold-h" id="vH"></h2><p class="sub" id="vSub"></p></div><div id="view"></div></div>
     </div>
@@ -349,6 +351,7 @@ function renderShell() {
   $('#manBtn') && ($('#manBtn').onclick = () => manualModal('admin', ADMIN_TOPIC[S.view] ?? 0));
   if (!$('#helpFab')) { const f = document.createElement('button'); f.id = 'helpFab'; f.className = 'help-fab'; f.type = 'button'; f.title = 'Manual'; f.setAttribute('aria-label', 'Manual'); f.textContent = '?'; f.onclick = () => manualModal('admin', ADMIN_TOPIC[S.view] ?? 0); document.body.appendChild(f); }
   if (!S.me?.support) manualFirstTime('admin');
+  if (S._inboxFor !== S.cid + S.user.uid) { S._inboxFor = S.cid + S.user.uid; startInbox(db, S.cid, ['admins'], S.user.uid); } else bindBell();
   updatePendingBadge();
   if (!NAV().some(n => n[0] === S.view)) S.view = 'dashboard';
   go(S.view);

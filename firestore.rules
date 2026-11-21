@@ -261,6 +261,12 @@ service cloud.firestore {
       }
 
       // Token notifikasi push (dibaca oleh Cloud Functions sahaja)
+      // Peti notifikasi dalam app (ditulis oleh server sahaja)
+      match /inbox/{nid} {
+        allow read: if (isWorkerOf(cid) && (resource.data.to == request.auth.uid || resource.data.to == 'workers'))
+          || (isAdminOf(cid) && resource.data.to == 'admins');
+        allow write: if false;
+      }
       match /tokens/{uid} {
         allow create, update: if request.auth != null && request.auth.uid == uid && (isWorkerOf(cid) || isAdminOf(cid));
         allow delete: if request.auth != null && request.auth.uid == uid;

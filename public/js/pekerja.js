@@ -21,6 +21,7 @@ import { payslipHtml, openPrint, periodLabel } from './payroll.js';
 import { claimTimeline, computeClaim, claimRates, SST_CATS, journeyTotal, purchaseTotal, allowanceTotal, claimDocHtml, statusBadge, emptyClaim } from './claims.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
 import { money } from './ui.js';
+import { bellHtml, startInbox, bindBell } from './inbox.js';
 
 const app = $('#app');
 const S = {
@@ -407,7 +408,7 @@ function renderShell() {
         <div class="co">${esc(S.company.name)}</div>
         <div class="small" style="opacity:.85">${esc(w.name)} · ${esc(S.me.workerId)}</div>
       </div>
-      ${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="">` : ''}${langBtn()}
+      ${bellHtml('icon-btn w-bell')}${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="">` : ''}${langBtn()}
     </div>
   </div>
   <main class="w-main" id="view"></main>
@@ -421,6 +422,7 @@ function renderShell() {
   $$('.bnav button').forEach(b => b.onclick = () => go(b.dataset.tab));
   if (!$('#helpFab')) { const f = document.createElement('button'); f.id = 'helpFab'; f.className = 'help-fab'; f.type = 'button'; f.setAttribute('aria-label', 'Manual'); f.textContent = '?'; f.onclick = () => manualModal('worker', ({ home: 1, rekod: 2, mohon: 4, berita: 6, profil: 6 })[S.tab] ?? 0); document.body.appendChild(f); }
   go(S.tab);
+  if (S._inboxFor !== S.user.uid) { S._inboxFor = S.user.uid; startInbox(db, S.cid, [S.user.uid, 'workers'], S.user.uid); } else bindBell();
   setTimeout(offerPasskey, 1500);
   // Jejak lokasi: semak bila app dibuka / kembali ke skrin, dan setiap 5 minit semasa dibuka
   if (!S._trailTimer) {
