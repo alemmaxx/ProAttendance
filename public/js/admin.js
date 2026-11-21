@@ -19,7 +19,7 @@ import {
 import {
   leaveTypes, leaveTypeName, DEFAULT_LEAVE_TYPES, holidayMap, fixedNationalHolidays, shiftById, shiftLabel, resolveDay,
   lateSettings, otKind, OT_LABEL, otRates, loadRoster, dateRange, weekStart, leaveBalances, leaveDateMap,
-  REQ_LABEL, STATUS_BADGE, countLeaveDays
+  REQ_LABEL, STATUS_BADGE, countLeaveDays, submitAutoOT
 } from './sched.js';
 import {
   computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2
@@ -1311,7 +1311,11 @@ function viewSettings() {
     </div>
     <div class="set-row"><div><b>${L('Tamat kerja automatik', 'Automatic clock-out')}</b><div class="small muted">${L('Pekerja yang lupa tekan Tamat Kerja dikeluarkan automatik pada waktu tamat syif (ditanda AUTO; pekerja dapat notifikasi & boleh mohon pembetulan jika masih bekerja). Mula Kerja tetap manual.', 'Staff who forget to tap End Work are clocked out automatically at shift end (marked AUTO; they get a notification & can request a fix if still working). Start Work stays manual.')}</div></div>
       <label class="switch"><input type="checkbox" id="tAOut" ${st.autoOut !== false ? 'checked' : ''}><span></span></label></div>
-    <div class="field" style="max-width:320px"><label class="lbl">${L('Semak selepas tamat syif (minit)', 'Check after shift end (minutes)')}</label><input class="input" type="number" min="0" max="240" id="wAOut" value="${st.autoOutAfter ?? 30}"></div>
+    <div class="grid2">
+      <div class="field"><label class="lbl">${L('Semak selepas tamat syif (minit)', 'Check after shift end (minutes)')}</label><input class="input" type="number" min="0" max="240" id="wAOut" value="${st.autoOutAfter ?? 30}"></div>
+      <div class="field"><label class="lbl">${L('Hari rehat / cuti umum: keluar automatik selepas (jam dari masuk)', 'Rest day / public holiday: auto clock-out after (hours from clock-in)')}</label><input class="input" type="number" min="1" max="16" step="0.5" id="wAOffH" value="${st.offDayAutoOutHrs ?? 9}"></div>
+    </div>
+    <p class="xs muted" style="margin-top:-.2rem">${L('Bila pembetulan punch "Tamat Kerja" diluluskan, rekod AUTO diganti dengan masa sebenar dan OT (jika OT automatik hidup) dikira semula & dihantar ke Kelulusan.', 'When a "Clock Out" punch correction is approved, the AUTO record is replaced with the real time and OT (if automatic OT is on) is recalculated & sent to Approvals.')}</p>
     <div class="set-row"><div><b>${L('Jejak lokasi waktu kerja', 'Work-hours location trail')}</b><div class="small muted">${L('Semasa bekerja (bukan rehat), lokasi pekerja direkod lebih kurang setiap 2 jam bila app dibuka — hanya jika berpindah lebih 100 m. Pekerja dapat notifikasi peringatan. Berguna untuk rekod tapak & tuntutan perjalanan. Tiada rekod di luar waktu kerja.', 'While working (not on break), staff location is recorded about every 2 hours when the app is open — only if they moved more than 100 m. Staff get a reminder notification. Useful for site records & travel claims. Nothing is recorded outside working hours.')}</div></div>
       <label class="switch"><input type="checkbox" id="tTrail" ${st.trail ? 'checked' : ''}><span></span></label></div>
     <h3 style="margin-top:.6rem">${L('Tetapan Clock-in', 'Clock-in Settings')}</h3>
@@ -1436,7 +1440,7 @@ function viewSettings() {
         'settings.grace': Number($('#wG').value || 0),
         'settings.autoBreak': $('#tABrk').checked, 'settings.breakStart': $('#wBs').value || '', 'settings.breakEnd': $('#wBe').value || '',
         'settings.autoOT': $('#tAOT').checked, 'settings.otMin': Number($('#wOm').value || 0), 'settings.otRound': Math.max(1, Number($('#wOr').value || 15)),
-        'settings.autoOut': $('#tAOut').checked, 'settings.autoOutAfter': Math.max(0, Number($('#wAOut').value || 0)), 'settings.trail': $('#tTrail').checked,
+        'settings.autoOut': $('#tAOut').checked, 'settings.autoOutAfter': Math.max(0, Number($('#wAOut').value || 0)), 'settings.offDayAutoOutHrs': Math.min(16, Math.max(1, Number($('#wAOffH').value || 9))), 'settings.trail': $('#tTrail').checked,
         'settings.workDays': $$('[data-wd]').filter(x => x.checked).map(x => Number(x.dataset.wd)),
         'settings.selfie': $('#tSelfie').checked, 'settings.oneDevice': $('#tDev').checked, 'settings.visits': $('#tVisit').checked
       });
@@ -1916,6 +1920,15 @@ function decide(r, ok) {
           if (!ok && !$('#apN', el).value.trim()) { toast(L('Sila nyatakan sebab ditolak.', 'Please give a reason for rejection.'), 'warn'); return false; }
           try {
             const b = writeBatch(db);
+            // Pembetulan "Tamat Kerja": buang rekod keluar AUTO pada hari itu (diganti masa sebenar)
+            let dayRecs = [];
+            if (ok && r.kind === 'fix' && r.type === 'out') {
+              dayRecs = (await getDocs(query(sub('attendance'), where('workerId', '==', r.workerId), where('date', '==', r.date)))).docs.map(d => ({ id: d.id, ...d.data() }));
+              if (perm() !== 'supervisor') {
+                dayRecs.filter(x => x.auto && ['out', 'break_out'].includes(x.type)).forEach(x => b.delete(doc(db, 'companies', S.cid, 'attendance', x.id)));
+                dayRecs = dayRecs.filter(x => !(x.auto && ['out', 'break_out'].includes(x.type)));
+              }
+            }
             const upd = { status: ok ? 'approved' : 'rejected', decidedAt: serverTimestamp(), decidedBy: S.user.email || '', adminNote: $('#apN', el).value.trim() };
             if (ok && r.kind === 'ot') upd.approvedHours = Number($('#apH', el).value || 0);
             if (ok && r.kind === 'advance') upd.approvedAmount = Number($('#apA', el).value || 0);
@@ -1942,6 +1955,17 @@ function decide(r, ok) {
             }
             await b.commit();
             logAct(ok ? 'request.approve' : 'request.reject', `${r.kind} ${r.workerId} ${r.id}`);
+            // Kira semula OT dari masa keluar sebenar
+            if (ok && r.kind === 'fix' && r.type === 'out' && S.company.settings?.autoOT) {
+              try {
+                const w = S.workers.find(x => x.id === r.workerId);
+                const recs = [...dayRecs, { type: 'out', ts: Timestamp.fromDate(new Date(`${r.date}T${r.time}:00`)), date: r.date }];
+                const ro = await loadRoster(db, S.cid, r.date, r.date).catch(() => ({}));
+                const ex = (await getDocs(query(sub('requests'), where('workerId', '==', r.workerId), where('date', '==', r.date)))).docs.map(d => d.data());
+                const h = w ? await submitAutoOT(db, S.cid, S.company, w, r.uid, r.date, recs, ro[r.date]?.[r.workerId], ex) : 0;
+                if (h) toast(L(`OT ${h} jam dikira dari masa sebenar & dihantar ke Kelulusan.`, `OT of ${h} hrs calculated from the real time & sent to Approvals.`), 'ok', 5000);
+              } catch (e) { console.warn('autoOT fix', e); }
+            }
             S.apApproved = null;
             toast(ok ? L('Diluluskan.', 'Approved.') : L('Ditolak.', 'Rejected.'));
             if (S.apTab !== 'pending') drawApprovals();

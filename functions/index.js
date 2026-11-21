@@ -460,10 +460,10 @@ exports.pa_attendanceWatch = onSchedule({ schedule: 'every 15 minutes', timeZone
       if (!w || w.active === false) continue;
       const sh = shiftFor(c, w, date, (await roster(date))[wid]);
       const firstIn = rs.find(r => r.type === 'in');
-      // Waktu tamat: tamat syif (merentas hari jika perlu); hari tanpa syif: 12 jam selepas masuk
+      // Waktu tamat: tamat syif (merentas hari jika perlu); hari rehat / cuti umum: N jam selepas masuk (tetapan, asal 9)
       let endMs;
       if (sh) { endMs = klMs(date, sh.end); if (sh.end <= sh.start) endMs += 86400000; }
-      else endMs = (firstIn?._t || last._t) + 12 * 3600000;
+      else endMs = (firstIn?._t || last._t) + Math.min(16, Math.max(1, Number(st.offDayAutoOutHrs ?? 9))) * 3600000;
       // Masuk semula selepas waktu tamat (OT malam): beri 4 jam dari masuk semula
       const lastIn = [...rs].reverse().find(r => r.type === 'in');
       if (lastIn && lastIn._t >= endMs) endMs = lastIn._t + 4 * 3600000;
@@ -473,7 +473,7 @@ exports.pa_attendanceWatch = onSchedule({ schedule: 'every 15 minutes', timeZone
         if (last.type === 'break_in') b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'break_out', date, ts: Timestamp.fromMillis(Math.max(last._t, endMs - 60000)), method: 'auto', auto: true, lat: null, lng: null, deviceId: null, dept: w.dept || '' });
         b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'out', date, ts: Timestamp.fromMillis(Math.max(last._t + 60000, endMs)), method: 'auto', auto: true, lat: null, lng: null, acc: null, deviceId: null, dept: w.dept || '', lid: null, locName: '', hasSelfie: false });
         await b.commit();
-        await sendTo(cid, t => t.id === last.uid, 'Tamat kerja automatik', `Anda dikeluarkan automatik pada ${hmOf(Math.max(last._t + 60000, endMs))} kerana terlupa tekan Tamat Kerja. Jika masih bekerja / OT, mohon Pembetulan Punch.`, '/worker');
+        await sendTo(cid, t => t.id === last.uid, 'Tamat kerja automatik', `Anda dikeluarkan automatik pada ${hmOf(Math.max(last._t + 60000, endMs))} kerana terlupa tekan Tamat Kerja. Mohon Pembetulan Punch dengan masa sebenar anda balik — OT dikira automatik bila diluluskan.`, '/worker');
         continue;
       }
       // Peringatan jejak lokasi (hanya dalam waktu kerja, bukan semasa rehat)
