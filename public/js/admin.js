@@ -2080,6 +2080,7 @@ function viewPayroll() {
   $('#view').innerHTML = `
     <div class="tabs">
       <button data-ptab="run">${L('Proses Gaji', 'Run Payroll')}</button>
+      <button data-ptab="mgmt">📊 ${L('Ringkasan Pengurusan', 'Management Summary')}</button>
       <button data-ptab="ea">${L('Ringkasan Tahunan (EA)', 'Yearly Summary (EA)')}</button>
       <button data-ptab="settings">${L('Tetapan Kewangan', 'Finance Settings')}</button>
     </div>
@@ -2088,7 +2089,97 @@ function viewPayroll() {
     b.classList.toggle('on', b.dataset.ptab === S.payTab);
     b.onclick = () => { S.payTab = b.dataset.ptab; viewPayroll(); };
   });
-  S.payTab === 'settings' ? drawPaySettings() : S.payTab === 'ea' ? drawEA() : drawPayrun();
+  S.payTab === 'settings' ? drawPaySettings() : S.payTab === 'ea' ? drawEA() : S.payTab === 'mgmt' ? drawPayMgmt() : drawPayrun();
+}
+
+// ---------- Ringkasan pengurusan: kos majikan, pecahan, OT, jabatan & trend 12 bulan (slip diluluskan sahaja) ----------
+function payBreak(items) {
+  const z = { n: 0, gross: 0, net: 0, basic: 0, allow: 0, ot: 0, bonus: 0, other: 0, unpaid: 0, erEpf: 0, erSocso: 0, erEis: 0, levy: 0, otHrs: 0, cost: 0 };
+  items.forEach(x => {
+    z.n++; z.gross += Number(x.gross || 0); z.net += Number(x.net || 0);
+    (x.earnings || []).forEach(e => { const k = ['basic', 'allow', 'ot', 'bonus'].includes(e.kind) ? e.kind : 'other'; z[k] += Number(e.amount || 0); });
+    (x.deductions || []).forEach(d => { if (d.kind === 'unpaid' || d.kind === 'late') z.unpaid += Number(d.amount || 0); });
+    z.erEpf += Number(x.employer?.epf || 0); z.erSocso += Number(x.employer?.socso || 0); z.erEis += Number(x.employer?.eis || 0); z.levy += Number(x.employer?.levy || 0);
+    z.otHrs += Number(x.days?.ot?.normal || 0) + Number(x.days?.ot?.rest || 0) + Number(x.days?.ot?.holiday || 0);
+  });
+  z.cost = z.gross + z.erEpf + z.erSocso + z.erEis + z.levy;
+  Object.keys(z).forEach(k => { z[k] = r2(z[k]); });
+  return z;
+}
+const approvedOf = (run) => Object.values(run?.items || {}).filter(x => x.status === 'approved' || run.status === 'locked');
+
+async function drawPayMgmt() {
+  const box = $('#payBody');
+  S.mgMonth = S.mgMonth || todayStr().slice(0, 7);
+  const per = S.mgMonth, [y, m] = per.split('-').map(Number);
+  const months = Array.from({ length: 12 }, (_, i) => { const d = new Date(y, m - 12 + i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
+  box.innerHTML = `<div class="card no-print"><div class="row between"><div class="row"><label class="lbl" style="margin:0">${L('Bulan', 'Month')}</label>
+      <input type="month" class="input" id="mgMon" value="${per}" style="width:auto"></div>
+      <button class="btn btn-sm btn-ghost" id="mgPrint">${icon('print', 16)} ${L('Cetak', 'Print')}</button></div></div>
+    <div id="mgOut"><div class="loader" style="min-height:150px"><span class="spin"></span></div></div>`;
+  $('#mgMon').onchange = (e) => { S.mgMonth = e.target.value; drawPayMgmt(); };
+  $('#mgPrint').onclick = () => window.print();
+  let runs = {};
+  try {
+    const s = await getDocs(query(sub('payruns'), where('period', '>=', months[0]), where('period', '<=', per)));
+    s.docs.forEach(d => { runs[d.data().period || d.id] = d.data(); });
+  } catch (e) { $('#mgOut').innerHTML = `<div class="card"><div class="empty">${esc(authErr(e))}</div></div>`; return; }
+  const prevPer = months[10];
+  const cur = payBreak(approvedOf(runs[per])), prev = payBreak(approvedOf(runs[prevPer]));
+  const pending = Object.values(runs[per]?.items || {}).length - cur.n;
+  const delta = (a, b) => {
+    if (!b) return `<span class="xs muted">—</span>`;
+    const p = ((a - b) / b) * 100, up = p >= 0;
+    return `<span class="xs" style="color:${Math.abs(p) < 0.5 ? 'var(--muted)' : up ? 'var(--warn)' : 'var(--ok)'}">${up ? '▲' : '▼'} ${Math.abs(p).toFixed(1)}%</span>`;
+  };
+  const trend = months.map(p => ({ p, b: payBreak(approvedOf(runs[p])) }));
+  const tMax = Math.max(1, ...trend.map(t => t.b.cost));
+  // Ikut jabatan
+  const wDept = Object.fromEntries(S.workers.map(w => [w.id, w.dept || L('Tiada jabatan', 'No department')]));
+  const dep = {};
+  approvedOf(runs[per]).forEach(x => { const k = wDept[x.workerId] || L('Tiada jabatan', 'No department'); (dep[k] = dep[k] || []).push(x); });
+  const depRows = Object.entries(dep).map(([k, list]) => ({ k, b: payBreak(list) })).sort((a, b) => b.b.cost - a.b.cost);
+  // OT tertinggi
+  const topOt = approvedOf(runs[per]).map(x => ({ x, h: r2(Number(x.days?.ot?.normal || 0) + Number(x.days?.ot?.rest || 0) + Number(x.days?.ot?.holiday || 0)), rm: r2((x.earnings || []).filter(e => e.kind === 'ot').reduce((a, e) => a + e.amount, 0)) }))
+    .filter(o => o.h > 0).sort((a, b) => b.rm - a.rm).slice(0, 5);
+  const row = (label, a, b) => `<tr><td>${label}</td><td class="right">${money(a)}</td><td class="right">${money(b)}</td><td class="right">${delta(a, b)}</td></tr>`;
+  $('#mgOut').innerHTML = `
+    <div class="print-head">${logoHtml(S.company)}<div><h3 style="margin:0">${esc(S.company.name)}</h3><div class="small">${L('Ringkasan Gaji Pengurusan', 'Management Payroll Summary')} · ${esc(periodLabel(per))}</div></div></div>
+    ${pending > 0 ? `<div class="card small" style="border-color:var(--warn)">⚠️ ${L(`${pending} slip bulan ini masih draf — tidak dikira dalam ringkasan.`, `${pending} slips this month are still drafts — not included in the summary.`)}</div>` : ''}
+    ${!cur.n ? `<div class="card"><div class="empty">${L('Tiada slip diluluskan untuk bulan ini.', 'No approved slips for this month.')}</div></div>` : ''}
+    <div class="stats">
+      <div class="stat"><div class="n" style="font-size:1.15rem">${money(cur.cost)}</div><div class="t">${L('Jumlah kos majikan', 'Total employer cost')} ${delta(cur.cost, prev.cost)}</div></div>
+      <div class="stat info"><div class="n" style="font-size:1.15rem">${money(cur.gross)}</div><div class="t">${L('Gaji kasar', 'Gross pay')} ${delta(cur.gross, prev.gross)}</div></div>
+      <div class="stat ok"><div class="n" style="font-size:1.15rem">${money(cur.net)}</div><div class="t">${L('Gaji bersih dibayar', 'Net pay paid')} ${delta(cur.net, prev.net)}</div></div>
+      <div class="stat warn"><div class="n" style="font-size:1.15rem">${money(cur.ot)}</div><div class="t">OT · ${cur.otHrs} ${L('jam', 'hrs')} ${delta(cur.ot, prev.ot)}</div></div>
+      <div class="stat"><div class="n">${cur.n}</div><div class="t">${L('Pekerja dibayar', 'Staff paid')} · ${L('purata kos', 'avg cost')} ${money(cur.n ? cur.cost / cur.n : 0)}</div></div>
+    </div>
+    <div class="grid2" style="gap:1rem;align-items:start">
+      <div class="card"><h3>${L('Pecahan kos', 'Cost breakdown')}</h3>
+        <div class="table-wrap"><table><thead><tr><th></th><th class="right">${esc(periodLabel(per))}</th><th class="right">${esc(periodLabel(prevPer))}</th><th class="right">%</th></tr></thead><tbody>
+          ${row(L('Gaji asas', 'Basic pay'), cur.basic, prev.basic)}${row(L('Elaun', 'Allowances'), cur.allow, prev.allow)}${row('OT', cur.ot, prev.ot)}
+          ${row(L('Bonus / insentif', 'Bonus / incentive'), cur.bonus, prev.bonus)}${row(L('Lain-lain', 'Other'), cur.other, prev.other)}
+          ${row(L('KWSP majikan', 'Employer EPF'), cur.erEpf, prev.erEpf)}${row(L('PERKESO majikan', 'Employer SOCSO'), cur.erSocso, prev.erSocso)}${row(L('SIP majikan', 'Employer EIS'), cur.erEis, prev.erEis)}
+          ${cur.levy || prev.levy ? row(L('Levi HRD', 'HRD levy'), cur.levy, prev.levy) : ''}
+          <tr class="bold"><td>${L('Jumlah kos majikan', 'Total employer cost')}</td><td class="right">${money(cur.cost)}</td><td class="right">${money(prev.cost)}</td><td class="right">${delta(cur.cost, prev.cost)}</td></tr>
+          ${cur.unpaid ? `<tr><td class="muted">${L('Potongan tanpa gaji / lewat (penjimatan)', 'Unpaid / late deductions (savings)')}</td><td class="right muted">${money(cur.unpaid)}</td><td class="right muted">${money(prev.unpaid)}</td><td></td></tr>` : ''}
+        </tbody></table></div></div>
+      <div class="card"><h3>${L('Trend kos majikan 12 bulan', 'Employer cost trend, 12 months')}</h3>
+        <div class="mg-chart">${trend.map(t => `<div class="mg-col" title="${esc(periodLabel(t.p))}: ${money(t.b.cost)}">
+          <div class="mg-v">${t.b.cost ? (t.b.cost >= 1000 ? (t.b.cost / 1000).toFixed(t.b.cost >= 100000 ? 0 : 1) + 'k' : Math.round(t.b.cost)) : ''}</div>
+          <div class="mg-bar ${t.p === per ? 'on' : ''}" style="height:calc((100% - 34px) * ${(t.b.cost / tMax).toFixed(3)})"><span style="height:${t.b.cost ? Math.round((t.b.ot / t.b.cost) * 100) : 0}%"></span></div>
+          <div class="mg-l">${t.p.slice(5)}/${t.p.slice(2, 4)}</div></div>`).join('')}</div>
+        <div class="row xs muted" style="margin-top:.4rem"><span><span class="mg-key"></span> ${L('Kos majikan', 'Employer cost')}</span><span><span class="mg-key ot"></span> ${L('bahagian OT', 'OT portion')}</span></div></div>
+    </div>
+    <div class="grid2" style="gap:1rem;align-items:start">
+      <div class="card"><h3>${L('Ikut jabatan', 'By department')}</h3>
+        ${depRows.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Jabatan', 'Department')}</th><th class="right">${L('Pekerja', 'Staff')}</th><th class="right">${L('Kasar', 'Gross')}</th><th class="right">OT</th><th class="right">${L('Kos majikan', 'Employer cost')}</th><th class="right">%</th></tr></thead><tbody>
+          ${depRows.map(d => `<tr><td>${esc(d.k)}</td><td class="right">${d.b.n}</td><td class="right">${money(d.b.gross)}</td><td class="right">${money(d.b.ot)}</td><td class="right bold">${money(d.b.cost)}</td><td class="right">${cur.cost ? ((d.b.cost / cur.cost) * 100).toFixed(1) : 0}%</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty">-</div>`}</div>
+      <div class="card"><h3>${L('OT tertinggi bulan ini', 'Highest OT this month')}</h3>
+        ${topOt.length ? `<div class="table-wrap"><table><thead><tr><th>${L('Pekerja', 'Staff')}</th><th class="right">${L('Jam', 'Hours')}</th><th class="right">RM</th></tr></thead><tbody>
+          ${topOt.map(o => `<tr><td>${esc(o.x.name)}</td><td class="right">${o.h}</td><td class="right">${money(o.rm)}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty small">${L('Tiada OT.', 'No OT.')}</div>`}
+        <p class="xs muted">${L('Ringkasan hanya mengira slip yang telah diluluskan. % = perubahan berbanding bulan sebelumnya (▲ kos naik).', 'Only approved slips are counted. % = change vs the previous month (▲ cost up).')}</p></div>
+    </div>`;
 }
 
 // Komit batch dalam ketulan (had 500 operasi)
