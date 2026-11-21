@@ -1390,6 +1390,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
       ${pts.length > 2 ? `<button type="button" class="icon-btn" data-px>✕</button>` : '<span></span>'}
     </div>`;
   const m = modal({
+    onClose: () => { after && setTimeout(after, 60); },
     title: idx === null ? L('Tambah perjalanan', 'Add journey') : L('Ubah perjalanan', 'Edit journey'),
     body: `${projOpts()}<datalist id="savedPl">${saved.map(p => `<option value="${esc(p.n)}">`).join('')}</datalist>
       <div class="grid2">
@@ -1414,7 +1415,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
       <div class="field"><label class="lbl">Remarks</label><input class="input" id="jm" maxlength="200" value="${esc(j.remarks || '')}"></div>
       <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>Total (RM)</b><b id="jt" style="color:var(--gold);font-size:1.2rem">0.00</b></div></div>`,
     actions: [
-      { label: L('Batal', 'Cancel'), onClick: () => { after && setTimeout(after, 60); } },
+      { label: L('Batal', 'Cancel') },
       {
         label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
           const row = read(el);
@@ -1425,7 +1426,7 @@ function journeyForm(cl, j = {}, idx = null, after) {
           const J = [...(cl.journeys || [])];
           if (idx === null) J.push(row); else J[idx] = row;
           cl.journeys = J;
-          try { await saveClaim(cl); toast(L('Disimpan ke draf.', 'Saved to draft.')); after && setTimeout(after, 60); }
+          try { await saveClaim(cl); toast(L('Disimpan ke draf.', 'Saved to draft.')); }
           catch (e) { toast(authErr(e), 'bad'); return false; }
         }
       }
@@ -1527,6 +1528,7 @@ function purchaseForm(cl, p = {}, idx = null, after) {
   const R = claimRates(S.company), t = todayStr(), cats = SST_CATS();
   let img = null, imgChanged = false;
   const m = modal({
+    onClose: () => { after && setTimeout(after, 60); },
     title: idx === null ? L('Tambah resit (SST Purchases)', 'Add receipt (SST Purchases)') : L('Ubah resit', 'Edit receipt'),
     body: `${projOpts()}
       <div class="grid2">
@@ -1547,7 +1549,7 @@ function purchaseForm(cl, p = {}, idx = null, after) {
       <div class="field"><label class="lbl">Remark (${L('projek', 'project')})</label><input class="input" id="pp" list="projList" value="${esc(p.project || '')}"></div>
       <div class="field"><label class="lbl">${L('Gambar resit', 'Receipt photo')}</label><input class="input" type="file" accept="image/*" id="pf"><div id="pfP" class="xs muted" style="margin-top:.3rem">${p.fileId ? '🧾 ' + L('Resit sudah dimuat naik', 'Receipt uploaded') : ''}</div></div>`,
     actions: [
-      { label: L('Batal', 'Cancel'), onClick: () => { after && setTimeout(after, 60); } },
+      { label: L('Batal', 'Cancel') },
       {
         label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
           const row = {
@@ -1566,7 +1568,7 @@ function purchaseForm(cl, p = {}, idx = null, after) {
             if (idx === null) P.push(row); else P[idx] = row;
             cl.purchases = P;
             await saveClaim(cl);
-            toast(L('Disimpan ke draf.', 'Saved to draft.')); after && setTimeout(after, 60);
+            toast(L('Disimpan ke draf.', 'Saved to draft.'));
           } catch (e) { toast(authErr(e), 'bad'); return false; }
         }
       }
@@ -1590,13 +1592,14 @@ function allowanceForm(cl, a = {}, idx = null, after) {
   const R = claimRates(S.company);
   const f = (k, label, step = '0.01') => `<div class="field"><label class="lbl">${label}</label><input class="input" type="number" step="${step}" min="0" data-ak="${k}" value="${a[k] ?? ''}" inputmode="decimal"></div>`;
   const m = modal({
+    onClose: () => { after && setTimeout(after, 60); },
     title: L('Elaun (Allowance Claim Form)', 'Allowance (Allowance Claim Form)'),
     body: `<div class="field"><label class="lbl">Expenses Details</label><input class="input" id="ad" maxlength="150" value="${esc(a.details || '')}"></div>
       ${f('project', 'Project Allowance (RM)')}
       <p class="xs muted">${L('Outstation & overnight diisi dalam tab Perjalanan.', 'Outstation & overnight are entered in the Journey tab.')}</p>
       <div class="card" style="background:var(--gold2);border-color:var(--gold)"><div class="row between"><b>Total (RM)</b><b id="at" style="color:var(--gold);font-size:1.2rem">0.00</b></div></div>`,
     actions: [
-      { label: L('Batal', 'Cancel'), onClick: () => { after && setTimeout(after, 60); } },
+      { label: L('Batal', 'Cancel') },
       {
         label: L('Simpan', 'Save'), cls: 'btn-primary', onClick: async ({ el }) => {
           const row = read(el);
@@ -1604,7 +1607,7 @@ function allowanceForm(cl, a = {}, idx = null, after) {
           const A = [...(cl.allowances || [])];
           if (idx === null) A.push(row); else A[idx] = row;
           cl.allowances = A;
-          try { await saveClaim(cl); after && setTimeout(after, 60); } catch (e) { toast(authErr(e), 'bad'); return false; }
+          try { await saveClaim(cl); } catch (e) { toast(authErr(e), 'bad'); return false; }
         }
       }
     ]
@@ -1734,7 +1737,8 @@ function viewProfil() {
   const ph = String(S.company.phone || '').replace(/\D/g, '').replace(/^0/, '60');
   $('#view').innerHTML = `
   <div class="card center">
-    <span class="logo-lg logo-ini" style="margin:0 auto .5rem">${esc((w.name || '?').split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase())}</span>
+    ${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="${esc(w.name)}" style="width:96px;height:96px;border:3px solid var(--gold);margin:0 auto .5rem;display:block;cursor:zoom-in" id="myPhoto">`
+      : `<span class="logo-lg logo-ini" style="margin:0 auto .5rem">${esc((w.name || '?').split(/\s+/).slice(0, 2).map(x => x[0]).join('').toUpperCase())}</span>`}
     <h3>${esc(w.name)}</h3>
     <span class="badge b-brand mono">${esc(S.me.workerId)}</span>
   </div>
@@ -1765,6 +1769,7 @@ function viewProfil() {
   </div>
   <p class="center xs muted" style="margin-top:1rem">ProAttendance · v${APP_VERSION}</p>`;
   $('#chPin').onclick = () => pinModal(false);
+  $('#myPhoto') && ($('#myPhoto').onclick = () => modal({ title: esc(w.name), body: `<img src="${esc(w.photo)}" alt="" style="width:100%;max-width:360px;display:block;margin:0 auto;border-radius:14px">` }));
   $('#manBtn').onclick = () => manualModal('worker', 0);
   if ($('#pkBtn') && !pkHas()) pkPrep('reg');
   $('#pkBtn') && ($('#pkBtn').onclick = async (e) => {

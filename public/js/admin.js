@@ -1265,7 +1265,7 @@ function viewSettings() {
     <p class="small muted">${L('Nama & logo ini dipaparkan pada halaman admin, halaman pekerja, slip & laporan.', 'This name & logo appear on the admin page, staff page, slips & reports.')}</p>
     <div class="row" style="margin:.6rem 0 1rem">
       <span id="logoPrev">${logoHtml(c, 'logo-lg')}</span>
-      <div class="stack" style="margin:0">
+      <div class="row" style="margin:0">
         <label class="btn btn-sm btn-soft" style="margin:0">${icon('plus', 16)} ${L('Muat naik logo', 'Upload logo')}<input type="file" accept="image/*" id="logoF" hidden></label>
         ${c.logo ? `<button class="btn btn-sm btn-ghost" id="logoX">${L('Buang logo', 'Remove logo')}</button>` : ''}
       </div>
