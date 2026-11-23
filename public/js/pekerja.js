@@ -505,6 +505,7 @@ function viewHome() {
     <div class="big-time" id="bigTime">--:--</div>
     <div class="muted" id="bigDate"></div>
     <div style="margin-top:.5rem">${todayStatusHtml()}</div>
+    ${S.worker.maxHours && sum.firstIn ? `<p class="small" style="margin-top:.4rem;color:var(--gold)">⏱ ${L(`Had kerja ${S.worker.maxHours} jam sehari`, `Work limit ${S.worker.maxHours} hrs/day`)} · ${sum.open ? L(`baki ${minsToHM(Math.max(0, S.worker.maxHours * 60 - sum.workMin))} — tamat automatik bila cukup`, `${minsToHM(Math.max(0, S.worker.maxHours * 60 - sum.workMin))} left — ends automatically`) : L('selesai', 'done')}</p>` : ''}
     ${S.sessionDate !== todayStr() ? `<p class="small" style="color:var(--warn);margin-top:.4rem">${L('Syif semalam masih terbuka', "Yesterday's shift is still open")} (${fmtDate(S.sessionDate)})</p>` : ''}
     <button class="punch-btn ${cls}" id="mainBtn">${icon(ico, 34)}<span>${TYPE_LABEL[main]()}</span></button>
     ${alt.map(a => `<button class="btn btn-ghost" data-alt="${a}">${TYPE_LABEL[a]()}</button>`).join('')}

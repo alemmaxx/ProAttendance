@@ -51,10 +51,12 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
   const byDate = {};
   recs.forEach(r => (byDate[r.date] = byDate[r.date] || []).push(r));
   let workMin = 0, lateMin = 0, lateDays = 0;
-  const present = new Set();
-  Object.entries(byDate).forEach(([d, list]) => {
+  const present = new Set(), hourLog = [];
+  const hm = (t) => { const x = toDate(t); return x ? x.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kuala_Lumpur' }) : ''; };
+  Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).forEach(([d, list]) => {
     const s = summarizeDay(list, lateSettings(c, info(d)), d);
     if (s.firstIn) present.add(d);
+    if (s.workMin > 0) hourLog.push([d, hm(s.firstIn), s.open ? '' : hm(s.lastOut), Math.round(s.workMin)]);
     workMin += s.workMin; lateMin += s.lateMin; if (s.lateMin) lateDays++;
   });
 
@@ -162,7 +164,8 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
     payType: w.payType || 'monthly', rate: R.rate, dailyRate: R.daily, hourlyRate: R.hourly,
     days: { present: presentN, leavePaid, leaveUnpaid, absent, lateMin, lateDays, workHours: r2(workMin / 60), ot: otH },
     earnings, deductions, employer: { epf: 0, socso: 0, eis: 0 }, period, claimIds, advanceIds, loanPays, branchId: w.branchId || '',
-    ytd: ytd || { y: 0, k: 0, x: 0, z: 0 }
+    ytd: ytd || { y: 0, k: 0, x: 0, z: 0 },
+    ...((partTime || w.payType === 'hourly') ? { hourLog } : {})
   };
   applyStatutory(item, P, w);
   return totals(item);
@@ -387,6 +390,8 @@ export function payslipClassic(c, slip, period) {
 </div>`;
 }
 const CLASSIC_CSS = `
+  .hl{max-width:820px;margin:14px auto 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#111;page-break-inside:auto}
+  .hl-t{font-weight:700;margin-bottom:4px} .hl table{width:100%;border-collapse:collapse} .hl th,.hl td{border:1px solid #999;padding:2px 6px;text-align:left} .hl thead th{background:#eee}
   .cl{max-width:820px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#111}
   .cl-head{text-align:center;margin-bottom:14px} .cl-head img{height:46px;max-width:160px;object-fit:contain;display:block;margin:0 auto 6px}
   .cl-co{font-family:"Courier New",monospace;font-weight:700;font-size:13px;letter-spacing:.5px} .cl-addr{font-family:"Courier New",monospace;font-size:12px;white-space:pre-line;line-height:1.45}
@@ -409,11 +414,24 @@ const CLASSIC_CSS = `
   @media(max-width:640px){.cl-grid,.cl-cols{grid-template-columns:1fr}}
 `;
 
+// Rekod jam kerja (pekerja ikut jam / separuh masa) — dilampirkan bersama slip
+export const MIN_WAGE = { monthly: 1700, hourly: 8.72 };
+function hourLogHtml(sl) {
+  const log = sl.hourLog || [];
+  if (!log.length) return '';
+  const tot = log.reduce((a, r) => a + r[3], 0);
+  const h = (m) => `${Math.floor(m / 60)}j ${String(m % 60).padStart(2, '0')}m`;
+  const rate = sl.payType === 'hourly' ? sl.rate : sl.hourlyRate;
+  return `<div class="hl"><div class="hl-t">${L('Rekod Jam Kerja', 'Hours Worked')} — ${esc(sl.name)}</div>
+    <table><thead><tr><th>${L('Tarikh', 'Date')}</th><th>${L('Masuk', 'In')}</th><th>${L('Keluar', 'Out')}</th><th style="text-align:right">${L('Jam', 'Hours')}</th></tr></thead>
+    <tbody>${log.map(r => `<tr><td>${fmtDate(r[0])}</td><td>${r[1]}</td><td>${r[2] || '-'}</td><td style="text-align:right">${h(r[3])}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><th colspan="3">${L('Jumlah', 'Total')} · ${(tot / 60).toFixed(2)} ${L('jam', 'hrs')} × RM${Number(rate || 0).toFixed(2)}</th><th style="text-align:right">${h(tot)}</th></tr></tfoot></table></div>`;
+}
 export function payslipHtml(c, slips, period) {
   const list = Array.isArray(slips) ? slips : [slips];
   const title = list.length === 1 ? `${L('Slip Gaji', 'Payslip')} ${list[0].name} ${period}` : `${L('Slip Gaji', 'Payslips')} ${period}`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${SLIP_CSS(c)}${CLASSIC_CSS}</style></head><body>
-${list.map(sl => `<div class="page">${payrollSettings(c).slipStyle === 'classic' ? payslipClassic(c, sl, period) : payslipBody(c, sl, period)}</div>`).join('')}
+${list.map(sl => `<div class="page">${payrollSettings(c).slipStyle === 'classic' ? payslipClassic(c, sl, period) : payslipBody(c, sl, period)}${hourLogHtml(sl)}</div>`).join('')}
 <p class="noprint" style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 20px;font-size:14px;cursor:pointer">${L('Cetak / Simpan PDF', 'Print / Save PDF')}</button></p>
 </body></html>`;
 }

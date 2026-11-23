@@ -23,7 +23,7 @@ import {
   REQ_LABEL, STATUS_BADGE, countLeaveDays, submitAutoOT
 } from './sched.js';
 import {
-  computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2
+  computeItem, applyStatutory, totals, payrollSettings, periodRange, periodLabel, payslipHtml, openPrint, r2, MIN_WAGE
 } from './payroll.js';
 import { pushAvailable, enablePush, refreshPush } from './push.js';
 import { computeClaim, claimRates, CLAIM_RATE_DEFAULTS, claimDocHtml, claimExcel, claimSummaryExcel, statusBadge as claimBadge, claimTimeline } from './claims.js';
@@ -727,7 +727,11 @@ function workerForm(w) {
           <option value="part" ${w.empType === 'part' ? 'selected' : ''}>${L('Separuh masa — bayar ikut jam', 'Part-time — paid by the hour')}</option></select>
           <div class="xs muted hide" id="wEmpTn" style="margin-top:.3rem">${L('Gaji = jam kerja (dari punch) × kadar sejam. Tiada KWSP, PERKESO, SIP, PCB, OT atau potongan lewat.', 'Pay = hours worked (from punches) × hourly rate. No EPF, SOCSO, EIS, PCB, OT or late deductions.')}</div></div>
         <div class="field"><label class="lbl">${L('Jenis gaji', 'Pay type')}</label><select class="input" name="payType">${opts(PAY_TYPES(), w.payType || 'monthly')}</select></div>
-        <div class="field"><label class="lbl">${L('Kadar gaji asas (RM)', 'Basic pay rate (RM)')}</label><input class="input" name="salary" type="number" step="0.01" min="0" value="${w.salary ?? ''}"></div>
+        <div class="field"><label class="lbl">${L('Kadar gaji asas (RM)', 'Basic pay rate (RM)')}</label><input class="input" name="salary" type="number" step="0.01" min="0" value="${w.salary ?? ''}">
+          <div class="xs" id="wMinW" style="margin-top:.3rem"></div></div>
+        <div class="field"><label class="lbl">${L('Had jam kerja sehari (tamat kerja automatik)', 'Max work hours per day (auto end work)')}</label>
+          <input class="input" name="maxHours" type="number" step="0.25" min="0" max="16" placeholder="${L('cth: 4 — kosong = ikut syif', 'e.g. 4 — blank = follow shift')}" value="${w.maxHours || ''}">
+          <div class="xs muted" style="margin-top:.3rem">${L('Bila jam kerja (tolak rehat) cukup, sistem rekod Tamat Kerja automatik pada masa itu.', 'When work hours (less breaks) are reached, the system records End Work automatically at that time.')}</div></div>
       </div>
       <div class="sec-title">${L('Bank & Berkanun', 'Bank & Statutory')}</div>
       <div class="grid2">
@@ -786,7 +790,16 @@ function workerForm(w) {
     $('#wEmpTn', el).classList.toggle('hide', !part);
     if (part) $('[name="payType"]', el).value = 'hourly';
   };
-  $('#wEmpT', el).onchange = empT; $('#wEmpTn', el).classList.toggle('hide', $('#wEmpT', el).value !== 'part');
+  $('#wEmpT', el).onchange = () => { empT(); minW(); }; $('#wEmpTn', el).classList.toggle('hide', $('#wEmpT', el).value !== 'part');
+  // Nota gaji minimum (Perintah Gaji Minimum 2024: RM1,700 sebulan / RM8.72 sejam)
+  const minW = () => {
+    const t = $('[name="payType"]', el).value, v = Number($('[name="salary"]', el).value || 0);
+    const min = t === 'hourly' ? MIN_WAGE.hourly : t === 'daily' ? r2(MIN_WAGE.monthly / 26) : MIN_WAGE.monthly;
+    const unit = t === 'hourly' ? L('sejam', 'per hour') : t === 'daily' ? L('sehari (6 hari seminggu)', 'per day (6-day week)') : L('sebulan', 'per month');
+    const low = v > 0 && v < min;
+    $('#wMinW', el).innerHTML = `<span style="color:${low ? 'var(--bad)' : 'var(--muted)'}">${low ? '⚠️ ' + L('Di bawah gaji minimum! ', 'Below minimum wage! ') : ''}${L('Gaji minimum', 'Minimum wage')}: RM${min.toFixed(2)} ${unit}</span>`;
+  };
+  $('[name="payType"]', el).addEventListener('change', minW); $('[name="salary"]', el).addEventListener('input', minW); minW();
   $('#wPhF', el).onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try {
@@ -814,7 +827,7 @@ async function saveWorker(el, w) {
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
     thNo: (fd.thNo || '').trim(), asbNo: (fd.asbNo || '').trim(),
-    empType: fd.empType === 'part' ? 'part' : 'full', nationality: fd.nationality || 'citizen', countryCode: String(fd.countryCode || '').trim().toUpperCase().slice(0, 2), socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
+    empType: fd.empType === 'part' ? 'part' : 'full', maxHours: Math.min(16, Math.max(0, Number(fd.maxHours || 0))) || null, nationality: fd.nationality || 'citizen', countryCode: String(fd.countryCode || '').trim().toUpperCase().slice(0, 2), socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
     allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp(),
     defaultShift: fd.defaultShift || '',
     workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],
@@ -2326,6 +2339,8 @@ function payDetail(period, x) {
   const m = modal({
     title: `${esc(x.name)} · ${esc(periodLabel(period))}`, wide: true,
     body: `
+      ${(x.payType === 'hourly' && x.rate > 0 && x.rate < MIN_WAGE.hourly) || ((!x.payType || x.payType === 'monthly') && x.rate > 0 && x.rate < MIN_WAGE.monthly) ? `<div class="card small" style="border-color:var(--bad)">⚠️ ${L(`Kadar gaji di bawah gaji minimum (RM${MIN_WAGE.monthly} sebulan / RM${MIN_WAGE.hourly} sejam).`, `Pay rate is below minimum wage (RM${MIN_WAGE.monthly}/month / RM${MIN_WAGE.hourly}/hour).`)}</div>` : ''}
+      ${x.hourLog?.length ? `<p class="small muted" style="margin:.2rem 0 .6rem">🕒 ${L('Rekod jam kerja harian dilampirkan bersama slip.', 'Daily hours log is attached to the slip.')}</p>` : ''}
       <div class="row" style="margin-bottom:.6rem">${isAp(x) ? `<span class="badge b-ok">✓ ${L('Diluluskan', 'Approved')}${x.approvedBy ? ' · ' + esc(x.approvedBy) : ''}</span>` : `<span class="badge b-warn">${L('Draf — pekerja belum nampak', 'Draft — not visible to staff')}</span>`}</div>
       <div class="tabs" style="margin-bottom:.6rem"><button data-dt="calc" class="on">${L('Kiraan', 'Calculation')}</button><button data-dt="slip">${L('Pratonton Slip', 'Slip Preview')}</button></div>
       <div data-dp="calc">

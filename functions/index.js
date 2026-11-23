@@ -455,7 +455,7 @@ exports.pa_attendanceWatch = onSchedule({ schedule: 'every 15 minutes', timeZone
     const c = cd.data(), st = c.settings || {};
     if (c.expiry && c.expiry.toMillis() < now) continue;
     const autoOut = st.autoOut !== false, trail = !!st.trail;
-    if (!autoOut && !trail) continue;
+    // Had jam kerja setiap pekerja (cth. separuh masa) sentiasa dikuatkuasakan walaupun auto keluar dimatikan
     const cid = cd.id;
     const att = await db.collection(`companies/${cid}/attendance`).where('date', 'in', [yest, today]).get();
     if (att.empty) continue;
@@ -473,6 +473,24 @@ exports.pa_attendanceWatch = onSchedule({ schedule: 'every 15 minutes', timeZone
       if (!w || w.active === false) continue;
       const sh = shiftFor(c, w, date, (await roster(date))[wid]);
       const firstIn = rs.find(r => r.type === 'in');
+      // Had jam kerja sehari: tamat bila jam kerja (tolak rehat) cukup — tanpa tempoh tunggu
+      const maxH = Number(w.maxHours || 0);
+      if (maxH > 0 && firstIn) {
+        let brk = 0, bs = null;
+        rs.forEach(r => { if (r.type === 'break_in') bs = r._t; else if (r.type === 'break_out' && bs) { brk += r._t - bs; bs = null; } });
+        if (last.type === 'break_in') brk += now - last._t;
+        const limitMs = firstIn._t + maxH * 3600000 + brk;
+        if (now >= limitMs) {
+          const b = db.batch();
+          const outT = Math.max(last._t + 60000, last.type === 'break_in' ? last._t + 60000 : limitMs);
+          if (last.type === 'break_in') b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'break_out', date, ts: Timestamp.fromMillis(last._t + 30000), method: 'auto', auto: true, lat: null, lng: null, deviceId: null, dept: w.dept || '' });
+          b.set(db.collection(`companies/${cid}/attendance`).doc(), { uid: last.uid, workerId: wid, name: last.name || w.name || '', type: 'out', date, ts: Timestamp.fromMillis(outT), method: 'auto', auto: true, maxHours: maxH, lat: null, lng: null, acc: null, deviceId: null, dept: w.dept || '', lid: null, locName: '', hasSelfie: false });
+          await b.commit();
+          await sendTo(cid, t => t.id === last.uid, 'Masa kerja cukup ⏱', `Had ${maxH} jam kerja hari ini telah cukup — Tamat Kerja direkod automatik pada ${hmOf(outT)}.`, '/worker', last.uid);
+          continue;
+        }
+      }
+      if (!autoOut && !trail) continue;
       // Waktu tamat: tamat syif (merentas hari jika perlu); hari rehat / cuti umum: N jam selepas masuk (tetapan, asal 9)
       let endMs;
       if (sh) { endMs = klMs(date, sh.end); if (sh.end <= sh.start) endMs += 86400000; }
