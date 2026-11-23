@@ -82,9 +82,12 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
   const presentN = present.size;
   const earnings = [], deductions = [];
 
+  // Separuh masa: bayar ikut jam kerja sahaja — tiada OT, potongan lewat/tidak hadir atau caruman
+  const partTime = w.empType === 'part';
   // Gaji asas
   let basic = 0, basicNote = '';
-  if (w.payType === 'daily') { basic = R.rate * (presentN + leavePaid); basicNote = `${presentN + leavePaid} ${L('hari', 'days')} × ${money(R.rate)}`; }
+  if (partTime) { const rate = w.payType === 'hourly' ? R.rate : R.hourly; basic = rate * (workMin / 60); basicNote = `${r2(workMin / 60)} ${L('jam', 'hrs')} × ${money(rate)} · ${L('separuh masa', 'part-time')}`; }
+  else if (w.payType === 'daily') { basic = R.rate * (presentN + leavePaid); basicNote = `${presentN + leavePaid} ${L('hari', 'days')} × ${money(R.rate)}`; }
   else if (w.payType === 'hourly') { basic = R.rate * (workMin / 60); basicNote = `${r2(workMin / 60)} ${L('jam', 'hrs')} × ${money(R.rate)}`; }
   else basic = R.rate;
   earnings.push({ name: L('Gaji Asas', 'Basic Pay'), note: basicNote, amount: r2(basic), kind: 'basic', epf: true, socso: true });
@@ -102,7 +105,7 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
   // OT diluluskan
   const otR = otRates(c);
   const otH = { normal: 0, rest: 0, holiday: 0 };
-  reqs.filter(r => r.kind === 'ot' && r.date >= from && r.date <= to)
+  reqs.filter(r => !partTime && r.kind === 'ot' && r.date >= from && r.date <= to)
     .forEach(r => { otH[otKind(info(r.date))] += Number(r.approvedHours ?? r.hours ?? 0); });
   Object.entries(otH).forEach(([k, h]) => {
     if (!h) return;
@@ -113,7 +116,7 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
   });
 
   // Bonus kehadiran penuh
-  if (Number(P.perfectBonus) > 0 && presentN > 0 && absent === 0 && lateDays === 0 && leaveUnpaid === 0) {
+  if (!partTime && Number(P.perfectBonus) > 0 && presentN > 0 && absent === 0 && lateDays === 0 && leaveUnpaid === 0) {
     earnings.push({ name: L('Bonus kehadiran penuh', 'Perfect attendance bonus'), note: '', amount: r2(P.perfectBonus), kind: 'bonus', epf: true, socso: true });
   }
 
@@ -121,13 +124,13 @@ export function computeItem({ c, w, period, recs, roster = {}, reqs = [], loans 
   const claimIds = [];
 
   // Potongan tanpa gaji / tidak hadir (gaji bulanan)
-  if (w.payType !== 'daily' && w.payType !== 'hourly') {
+  if (!partTime && w.payType !== 'daily' && w.payType !== 'hourly') {
     const unpaidDays = (P.deductUnpaid ? leaveUnpaid : 0) + (P.deductAbsent ? absent : 0);
     if (unpaidDays > 0) deductions.push({ name: L('Cuti tanpa gaji / tidak hadir', 'Unpaid leave / absence'), note: `${unpaidDays} × ${money(R.daily)}`, amount: r2(unpaidDays * R.daily), kind: 'unpaid' });
   }
   // Potongan lewat
-  if (P.lateMode === 'perMin' && lateMin) deductions.push({ name: L('Potongan lewat', 'Late deduction'), note: `${lateMin} min × ${money(P.lateAmount)}`, amount: r2(lateMin * P.lateAmount), kind: 'late' });
-  if (P.lateMode === 'perDay' && lateDays) deductions.push({ name: L('Potongan lewat', 'Late deduction'), note: `${lateDays} × ${money(P.lateAmount)}`, amount: r2(lateDays * P.lateAmount), kind: 'late' });
+  if (!partTime && P.lateMode === 'perMin' && lateMin) deductions.push({ name: L('Potongan lewat', 'Late deduction'), note: `${lateMin} min × ${money(P.lateAmount)}`, amount: r2(lateMin * P.lateAmount), kind: 'late' });
+  if (!partTime && P.lateMode === 'perDay' && lateDays) deductions.push({ name: L('Potongan lewat', 'Late deduction'), note: `${lateDays} × ${money(P.lateAmount)}`, amount: r2(lateDays * P.lateAmount), kind: 'late' });
 
   // Potongan dari profil pekerja
   (w.deductions || []).forEach(d => {
@@ -176,7 +179,13 @@ export function applyStatutory(item, P, w = {}) {
   const pick = (ov, base, pct) => (ov !== undefined && ov !== null && ov !== '') ? r2(ov) : r2(base * Number(pct || 0) / 100);
   item.bases = { epf: r2(epfBase), socso: r2(socsoBase) };
   let ee, skbbk = 0;
-  if (P.statMode !== 'percent') {
+  if (w.empType === 'part') {
+    // Pekerja separuh masa: tiada KWSP / PERKESO / SIP / SKBBK / PCB / levi (tetapan syarikat)
+    ee = { epf: 0, socso: 0, eis: 0, pcb: 0 };
+    item.employer = { epf: 0, socso: 0, eis: 0 };
+    item.statNote = L('Separuh masa — tiada caruman berkanun', 'Part-time — no statutory contributions');
+    item.pcbCalc = null; item.partTime = true;
+  } else if (P.statMode !== 'percent') {
     // Jadual rasmi KWSP / PERKESO / SIP / SKBBK ikut status & umur pekerja
     const period = item.period || new Date().toISOString().slice(0, 7);
     const o = { nationality: w.nationality || 'citizen', age: ageAt(w.dob, period), cat2: !!w.socsoCat2, skbbk: w.skbbk !== false, period };
@@ -190,8 +199,8 @@ export function applyStatutory(item, P, w = {}) {
     item.employer = { epf: pick(st.epfEr, epfBase, P.epfEr), socso: pick(st.socsoEr, socsoBase, P.socsoEr), eis: pick(st.eisEr, socsoBase, P.eisEr) };
   }
   // PCB automatik (formula berkomputer LHDN) — guna KWSP pekerja yang baru dikira
-  item.pcbCalc = null;
-  if (isAutoPcb(pcbCfg)) {
+  if (w.empType !== 'part') item.pcbCalc = null;
+  if (w.empType !== 'part' && isAutoPcb(pcbCfg)) {
     const per = item.period || new Date().toISOString().slice(0, 7);
     const isBonus = (e) => e.kind === 'bonus';
     const yAll = item.earnings.reduce((a, e) => a + Number(e.amount || 0), 0) - red;
@@ -203,7 +212,7 @@ export function applyStatutory(item, P, w = {}) {
     item.pcbCalc = { ...c, y1: r2(Math.max(0, yAll - yt)), yt: r2(yt), k1: r2(Math.max(0, ee.epf - kt)), kt, ytd: item.ytd || {}, zakat: r2(pcbCfg.zakat || 0), cat: Number(pcbCfg.cat || 1) };
   }
   // Levi HRD Corp (majikan): % daripada gaji asas + elaun tetap bulanan
-  if (Number(P.hrdRate) > 0) {
+  if (Number(P.hrdRate) > 0 && w.empType !== 'part') {
     const hrdBase = (item.earnings || []).filter(e => e.kind === 'basic' || (e.kind === 'allow' && !e.once)).reduce((a, e) => a + Number(e.amount || 0), 0);
     item.employer.levy = r2(hrdBase * Number(P.hrdRate) / 100);
   }

@@ -639,7 +639,7 @@ function renderWorkerList() {
     <thead><tr><th>ID</th><th>${L('Nama', 'Name')}</th><th>${L('Jawatan', 'Position')}</th><th>${L('Lokasi', 'Location')}</th><th>${L('Status', 'Status')}</th><th></th></tr></thead>
     <tbody>${list.map(w => `<tr>
       <td class="mono bold">${esc(w.id)}</td>
-      <td><div class="row" style="flex-wrap:nowrap;gap:.5rem">${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="">` : `<span class="avatar">${esc((w.name || '?').trim()[0] || '?').toUpperCase()}</span>`}<div>${esc(w.name)}<div class="xs muted">${esc(w.phone || '')}</div></div></div></td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:.5rem">${w.photo ? `<img class="avatar" src="${esc(w.photo)}" alt="">` : `<span class="avatar">${esc((w.name || '?').trim()[0] || '?').toUpperCase()}</span>`}<div>${esc(w.name)}${w.empType === 'part' ? ` <span class="badge b-info">${L('Separuh masa', 'Part-time')}</span>` : ''}<div class="xs muted">${esc(w.phone || '')}</div></div></div></td>
       <td class="small">${esc(w.position || '-')}<div class="xs muted">${esc(w.dept || '')}</div></td>
       <td class="small">${esc(locName(w.branchId))}</td>
       <td>${w.active === false ? `<span class="badge b-bad">${L('Tidak aktif', 'Inactive')}</span>` : `<span class="badge b-ok">${L('Aktif', 'Active')}</span>`}
@@ -722,6 +722,10 @@ function workerForm(w) {
         ${S.locations.length > 1 ? `<div class="field" style="grid-column:1/-1"><label class="lbl">${L('Lokasi dibenarkan punch (kosong = ikut lokasi utama / semua)', 'Locations allowed for punching (none = main location / all)')}</label>
           <div class="row">${S.locations.map(l => `<label class="check"><input type="checkbox" data-wloc="${l.id}" ${(w.locIds || []).includes(l.id) ? 'checked' : ''}>${esc(l.name)}</label>`).join('')}</div></div>` : ''}
         <div class="field"><label class="lbl">${L('Tarikh mula kerja', 'Start date')}</label><input class="input" name="startDate" type="date" value="${esc(w.startDate || '')}"></div>
+        <div class="field"><label class="lbl">${L('Taraf pekerjaan', 'Employment type')}</label><select class="input" name="empType" id="wEmpT">
+          <option value="full" ${w.empType !== 'part' ? 'selected' : ''}>${L('Sepenuh masa', 'Full-time')}</option>
+          <option value="part" ${w.empType === 'part' ? 'selected' : ''}>${L('Separuh masa — bayar ikut jam', 'Part-time — paid by the hour')}</option></select>
+          <div class="xs muted hide" id="wEmpTn" style="margin-top:.3rem">${L('Gaji = jam kerja (dari punch) × kadar sejam. Tiada KWSP, PERKESO, SIP, PCB, OT atau potongan lewat.', 'Pay = hours worked (from punches) × hourly rate. No EPF, SOCSO, EIS, PCB, OT or late deductions.')}</div></div>
         <div class="field"><label class="lbl">${L('Jenis gaji', 'Pay type')}</label><select class="input" name="payType">${opts(PAY_TYPES(), w.payType || 'monthly')}</select></div>
         <div class="field"><label class="lbl">${L('Kadar gaji asas (RM)', 'Basic pay rate (RM)')}</label><input class="input" name="salary" type="number" step="0.01" min="0" value="${w.salary ?? ''}"></div>
       </div>
@@ -777,6 +781,12 @@ function workerForm(w) {
   });
   const el = m.el;
   bindDyn(el);
+  const empT = () => {
+    const part = $('#wEmpT', el).value === 'part';
+    $('#wEmpTn', el).classList.toggle('hide', !part);
+    if (part) $('[name="payType"]', el).value = 'hourly';
+  };
+  $('#wEmpT', el).onchange = empT; $('#wEmpTn', el).classList.toggle('hide', $('#wEmpT', el).value !== 'part');
   $('#wPhF', el).onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try {
@@ -804,7 +814,7 @@ async function saveWorker(el, w) {
     payType: fd.payType, salary: Number(fd.salary || 0),
     bank: fd.bank.trim(), bankAcc: fd.bankAcc.trim(), epfNo: fd.epfNo.trim(), socsoNo: fd.socsoNo.trim(), taxNo: fd.taxNo.trim(),
     thNo: (fd.thNo || '').trim(), asbNo: (fd.asbNo || '').trim(),
-    nationality: fd.nationality || 'citizen', countryCode: String(fd.countryCode || '').trim().toUpperCase().slice(0, 2), socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
+    empType: fd.empType === 'part' ? 'part' : 'full', nationality: fd.nationality || 'citizen', countryCode: String(fd.countryCode || '').trim().toUpperCase().slice(0, 2), socsoCat2: !!fd.socsoCat2, skbbk: !(fd.skbbkOut && fd.nationality !== 'foreign'),
     allowances: readRows(el, 'allow'), deductions: readRows(el, 'ded'), updatedAt: serverTimestamp(),
     defaultShift: fd.defaultShift || '',
     workDays: $('#wdOwn', el).checked ? $$('[data-wwd]', el).filter(x => x.checked).map(x => Number(x.dataset.wwd)) : [],

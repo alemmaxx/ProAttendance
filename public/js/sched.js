@@ -101,7 +101,7 @@ export function computeAutoOT(c, w, date, recs, rosterVal) {
 
 // Hantar permohonan OT automatik (baki yang belum dimohon) untuk kelulusan majikan
 export async function submitAutoOT(dbx, cid, c, w, uid, date, recs, rosterVal, existing) {
-  if (!c?.settings?.autoOT) return 0;
+  if (!c?.settings?.autoOT || w?.empType === 'part') return 0;   // separuh masa: dibayar ikut jam, tiada OT
   const r = computeAutoOT(c, w, date, recs, rosterVal);
   if (!r.mins) return 0;
   const already = existing.filter(x => x.kind === 'ot' && x.auto && x.date === date && !['rejected', 'cancelled'].includes(x.status))
